@@ -51,7 +51,14 @@ jobs:
       # public/mgba/, together with its notice and a manifest of what was copied.
       - run: npm run build
 
+      # `enablement: true` lets the workflow turn Pages on itself, so the first run
+      # of this file publishes the site instead of failing until someone flips the
+      # repository setting by hand. It is a no-op once Pages exists. If the token
+      # cannot enable it (permissions changed, or Pages was disabled deliberately),
+      # this step says so and the repository setting remains the fallback path.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist
