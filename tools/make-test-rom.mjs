@@ -313,7 +313,7 @@ function buildHeader(codeStartOffset) {
   return header;
 }
 
-function buildRom() {
+export function buildRom() {
   const header = buildHeader(0xc0);
   const code = buildCode();
   const codeBytes = Buffer.alloc(code.length * 4);
@@ -337,7 +337,11 @@ async function main() {
   console.log(`  complement chk   0x${rom[0xbd].toString(16).padStart(2, '0')}`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+// Only run when invoked directly, so tests can import `buildRom` without
+// writing files as a side effect.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
