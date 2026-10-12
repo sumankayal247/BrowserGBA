@@ -13,17 +13,38 @@ stay on their own device.
 - **No ROMs, no BIOS, no cheat databases, no artwork from games.** You bring your
   own files; they are validated before they are stored.
 
+## Try it live
+
+**<https://sumankayal247.github.io/BrowserGBA/>** — the current build, deployed from
+this repository by `.github/workflows/deploy-pages.yml`.
+
+Everything works there **except the database-backed community catalog**, because that
+part does not exist yet: Phase 7 of [`GAME_PLAN.md`](GAME_PLAN.md) (a MongoDB-backed
+metadata service) is unimplemented everywhere, not just on Pages. What you get on
+that URL is the whole local app — import a ROM, play, save, export, edit your library.
+
+The site is published by `.github/workflows/deploy-pages.yml` on every push to
+`arena` or `main`. (If that URL is not live yet, the repository's one-time setting is
+**Settings → Pages → Build and deployment → Source: GitHub Actions**.)
+
+One caveat that only applies to hosting like this: GitHub Pages cannot send response
+headers, so the first visit is not cross-origin isolated and the emulator refuses to
+start. The app's own service worker fixes that by serving the two headers browsers
+require; press **Enable playback (reloads once)** — or simply come back later — and
+games run. No configuration in the repository is needed for that; see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Status
 
-Phase 1 of the plan in [`GAME_PLAN.md`](GAME_PLAN.md) is in place and green:
+Phases 0–6 of the plan in [`GAME_PLAN.md`](GAME_PLAN.md) are in place and green:
 
 | Gate | Result |
 | --- | --- |
 | `npm run typecheck` | clean (TypeScript 7, `strict`) |
-| `npm test` | 130 tests across 5 files |
-| `npm run build` | `dist/` + service worker with a precache manifest |
-| `npm run test:browser` | 17/17 — real Chromium, real mGBA core, fixture ROM |
-| `npm run test:e2e` | 41/41 — real UI: import → play → screenshot → save → cheat → remap → duplicate handling → offline |
+| `npm test` | 165 tests across 9 files |
+| `npm run build` | 42 modules; `dist/` + service worker with 22 precache entries |
+| `npm run test:browser` | 17/17 — real browser, real mGBA core, fixture ROM |
+| `npm run test:e2e` | 61/61 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair → embed refusal → offline |
 
 What is **not** verified is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), which
 mirrors the app's own Compatibility screen. In particular: no commercial ROM has
@@ -36,8 +57,15 @@ claim — the expectation rests on the stock mGBA core, nothing more.
 - A browser with WebAssembly threads, i.e. a **cross-origin isolated** page
   (`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy:
   require-corp`). The dev server sets these for you; a host must send them in
-  production — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Without them the
-  library still works and the app explains why playback is blocked.
+  production — and if it cannot, the app's service worker supplies them after one
+  reload. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Without them the library
+  still works and the app explains why playback is blocked.
+- **Chromium and Firefox** are both supported targets: the app avoids
+  Chromium-only APIs and picks default shortcuts that Firefox does not claim for
+  itself (F5 reloads the page and F9 opens Reader View, so quick save/load are F2/F4
+  and screenshots are F8). The automated browser suites run in Chromium; set
+  `BROWSERGBA_FIREFOX=/path/to/firefox` to run the same checks in Gecko. Firefox has
+  not been run in CI yet — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 ## Quick start
 
@@ -69,19 +97,27 @@ npm run preview      # serve the build on http://localhost:4173
 | `npm run sync:core` | vendor the mGBA wasm build into `public/mgba/` |
 | `npm run lint` | type-check (the lint gate is the type checker) |
 
-The two browser suites need a Chromium binary:
+The two browser suites need a browser binary — your own, never a download:
 
 ```bash
-BROWSERGBA_CHROMIUM=/path/to/chrome npm run test:e2e
+BROWSERGBA_CHROMIUM=/path/to/chrome npm run test:e2e    # Chromium
+BROWSERGBA_FIREFOX=/path/to/firefox npm run test:browser  # the same probe in Firefox
 ```
 
-They use `puppeteer-core` — your own browser, never a download — and report what is
-missing instead of failing when no browser is found.
+They use `puppeteer-core` and report what is missing instead of failing when no
+browser is found. Firefox is driven over WebDriver BiDi, so the suites stay free of
+Chromium-only calls.
 
 ## Using it
 
 - **Library** — import, search, tag, favourite, sort, rename, cover art, playtime.
   Duplicate imports are detected by content hash and never silently merged.
+- **Editing** — the pencil on any game card opens one editor for the display name,
+  cover image, tags, notes and links. Links are yours: paste any address you like.
+  The app checks nothing about where a link points — no allow-list, no deny-list, no
+  reputation lookup, no network request. The only rule is that a `javascript:`,
+  `data:` or `vbscript:` URL is shown as text instead of a clickable link, so a
+  pasted string can never run code in the page.
 - **Playback** — pixel-perfect 240×160 canvas with integer scaling, optional CRT /
   scanline filters, adjustable normal and fast-forward speeds, hold-to-rewind,
   volume and mute, reset, and a fullscreen mode.

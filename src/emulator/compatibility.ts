@@ -163,6 +163,15 @@ export const CAPABILITY_GROUPS: CapabilityGroup[] = [
         evidence: 'Runtime detection with an explanatory UI; a browser test asserts isolation is granted by the documented headers.',
       },
       {
+        id: 'self-isolation',
+        feature: 'Working on a host that sends no isolation headers',
+        level: 'implemented',
+        notes:
+          'A static host that cannot be configured (a plain file server, a forum deployment, a self-hosted box without edit access to its headers) can still run the emulator: the app\u2019s service worker re-serves its own responses with the two headers browsers require, and the user is offered a single reload to activate that. It is never done silently \u2014 nothing is repaired until you press the button \u2014 and it cannot work inside an embedded frame, where browsers do not grant cross-origin isolation at all; there the app says so instead of pretending to fix it.',
+        evidence:
+          'App-level browser tests drive three origins: one served with the headers, one with none, and one embedding the app cross-origin. They assert that a header-less origin starts un-isolated, that the blocked player offers the repair, that after the reload the page reports crossOriginIsolated and SharedArrayBuffer is available, that the game then runs and its frames match the test ROM, and that the framed copy is refused (never offered a repair it could not complete). The worker is also asserted to send COOP: same-origin and COEP: require-corp on its own responses.',
+      },
+      {
         id: 'indexeddb',
         feature: 'Local library, saves and states',
         level: 'implemented',
@@ -177,6 +186,24 @@ export const CAPABILITY_GROUPS: CapabilityGroup[] = [
           'The shell and the emulator core are cached for offline launch. ROMs, saves and states stay in IndexedDB, never in the service-worker cache.',
         evidence:
           'The app-level browser test waits for the worker to reach `activated` and asserts it precached the shell; the build fails if a service-worker placeholder is left unsubstituted. See docs/DEPLOYMENT.md.',
+      },
+      {
+        id: 'engines',
+        feature: 'Browser engines (Chromium, Firefox, Safari)',
+        level: 'implemented',
+        notes:
+          'BrowserGBA targets the Web platform rather than one engine: no Chromium-only APIs, files downloaded through an ordinary link, and the threaded core gated on cross-origin isolation, which Chromium, Firefox and Safari all implement. Default shortcuts deliberately steer clear of keys a browser claims first (F5 reloads the page, F9 is Reader View in Firefox), and Firefox is detected explicitly \u2014 including Firefox for iOS, which identifies itself as Firefox but runs WebKit.',
+        evidence:
+          'Automated: the unit and browser suites run the app in Chromium, including engine detection, and the input tests assert that no default shortcut is a reserved browser key. Firefox: the browser harness accepts a Firefox binary (BROWSERGBA_FIREFOX) and drives the same smoke test, but no Firefox build was available in the environment where this release was prepared, so Firefox is not yet covered by an automated run \u2014 it is untested, not known-bad. Safari: engine detection reports it, no automated run.',
+      },
+      {
+        id: 'vibration',
+        feature: 'Haptic feedback on touch controls',
+        level: 'implemented',
+        notes:
+          'Optional short pulse when a touch button is pressed, using the Vibration API. It is off by default, only fires for touch input, and is silently skipped where there is no motor or the browser does not implement the API (desktop Firefox and Chrome, and iOS Safari, do not).',
+        evidence:
+          'Unit tests cover the on/off switch and that a missing or refusing implementation is ignored instead of surfacing an error. The pulse itself cannot be observed by an automated test and has not been verified on a physical device.',
       },
       {
         id: 'gamepad',

@@ -710,6 +710,131 @@ input[type="checkbox"] {
   background: rgba(125, 211, 160, 0.07);
 }
 
+/* --- game detail header -------------------------------------------------- */
+
+.game-detail-head {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+  gap: 1rem 1.25rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+
+.cover-box {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.cover-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Says what the app will not do (fetch box art) without looking like an error. */
+.cover-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.cover-placeholder span:first-child {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+@media (max-width: 620px) {
+  .game-detail-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cover-box {
+    max-width: 240px;
+  }
+}
+
+/* --- game editor dialog -------------------------------------------------- */
+
+.cover-preview {
+  width: 100%;
+  max-width: 260px;
+  aspect-ratio: 3 / 2;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.5rem;
+}
+
+.cover-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.link-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Label, address and remove — three columns that collapse to a stack on a phone. */
+.link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.link-row input {
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  .link-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .link-row input:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.link-list .link-row {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35rem;
+}
+
+.link-list .link-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.link-list a {
+  overflow-wrap: anywhere;
+}
+
 /* --- badges & status ---------------------------------------------------- */
 
 .badge {

@@ -18,31 +18,11 @@ import { spawn } from 'node:child_process';
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { launchBrowser, skipMessage } from './harness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = Number(process.env.BROWSERGBA_SMOKE_PORT ?? 4319);
 const BASE = `http://127.0.0.1:${PORT}`;
-
-const CHROMIUM_CANDIDATES = [
-  process.env.BROWSERGBA_CHROMIUM,
-  '/tmp/chromium',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-].filter(Boolean);
-
-async function findChromium() {
-  for (const candidate of CHROMIUM_CANDIDATES) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      /* keep looking */
-    }
-  }
-  return null;
-}
 
 /** Minimal static file server that sends the cross-origin isolation headers. */
 async function startServer() {
@@ -108,12 +88,14 @@ async function startServer() {
 }
 
 async function main() {
-  const chromium = await findChromium();
-  if (!chromium) {
-    console.log('[test:browser] SKIPPED — no Chromium binary found.');
-    console.log('[test:browser] Set BROWSERGBA_CHROMIUM=/path/to/chrome to enable this check.');
+  // Chromium by default; set BROWSERGBA_FIREFOX to run the same probe in Gecko.
+  const launched = await launchBrowser();
+  if (!launched) {
+    skipMessage('test:browser');
     return;
   }
+  const { browser, engineLabel } = launched;
+  console.log(`[test:browser] running in ${engineLabel}`);
 
   // The fixture ROM is generated, not committed — make sure it exists.
   try {
@@ -129,20 +111,6 @@ async function main() {
   await mkdir(path.join(root, 'tests', 'browser', 'artifacts'), { recursive: true });
 
   const server = await startServer();
-  const { default: puppeteer } = await import('puppeteer-core');
-
-  const browser = await puppeteer.launch({
-    executablePath: chromium,
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--mute-audio',
-      '--use-gl=swiftshader',
-      '--enable-unsafe-swiftshader',
-    ],
-  });
 
   let failure = null;
   try {

@@ -29,6 +29,14 @@ import {
 } from '@/storage/backup';
 import { formatDuration } from '@/storage/quota';
 import { getCover, MAX_COVER_BYTES, removeCover, setCover } from '@/storage/covers';
+import {
+  isNavigableUrl,
+  linkDisplayLabel,
+  linkHost,
+  normalizeLinks,
+  type GameLink,
+} from '@/library/links';
+import { openGameEditor } from '@/ui/edit-game';
 import { notice, type ViewContext, type ViewInstance } from '@/app/app';
 
 export async function renderGameView(context: ViewContext): Promise<ViewInstance> {
@@ -171,7 +179,7 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
               }),
               el('button', {
                 className: 'btn',
-                text: 'Rename / tag / notes',
+                text: 'Edit name / cover / links',
                 attrs: { type: 'button' },
                 on: { click: () => void editMetadata() },
               }),
@@ -223,46 +231,58 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
     void app.renderRoute();
   }
 
+  const linksHost = el('div', { className: 'link-list' });
+
+  /**
+   * Renders the user's own links.
+   *
+   * Destinations are not filtered: whatever was pasted is shown. The only
+   * special case is a URL the browser cannot safely navigate to (for example a
+   * `javascript:` string someone pasted) — that is displayed as text instead of
+   * being turned into a live link, because a pasted link must never be able to
+   * run code on this page.
+   */
+  function renderLinks(): void {
+    const links: GameLink[] = normalizeLinks(record.links);
+    if (links.length === 0) {
+      linksHost.replaceChildren(
+        el('p', { className: 'small muted', text: 'No links yet.' }),
+      );
+      return;
+    }
+    linksHost.replaceChildren(
+      ...links.map((link) => {
+        const label = linkDisplayLabel(link);
+        if (!isNavigableUrl(link.url)) {
+          return el('div', {
+            className: 'link-row',
+            children: [
+              el('span', { text: label }),
+              el('span', {
+                className: 'mono small muted',
+                text: `${link.url} (kept as text: this URL would run code, not open a page)`,
+              }),
+            ],
+          });
+        }
+        return el('div', {
+          className: 'link-row',
+          children: [
+            el('a', {
+              text: label,
+              attrs: { href: link.url, target: '_blank', rel: 'noopener noreferrer nofollow' },
+            }),
+            el('span', { className: 'mono small muted', text: linkHost(link.url) }),
+          ],
+        });
+      }),
+    );
+  }
+
+  renderLinks();
+
   async function editMetadata(): Promise<void> {
-    const name = await promptDialog({
-      title: 'Rename game',
-      label: 'Display title',
-      initialValue: title,
-      maxLength: 80,
-      description: 'This only changes how the game is listed here; the ROM file itself is untouched.',
-    });
-    if (name === null) return;
-
-    const tagsText = await promptDialog({
-      title: 'Tags',
-      label: 'Tags (comma separated)',
-      initialValue: record.tags.join(', '),
-      maxLength: 200,
-      description: 'Tags are stored with the game and can be used to filter the library.',
-    });
-    if (tagsText === null) return;
-
-    const notes = await promptDialog({
-      title: 'Notes',
-      label: 'Notes for yourself',
-      initialValue: record.notes,
-      multiline: true,
-      maxLength: 2000,
-      description: 'Kept locally. Notes are plain text and are never rendered as HTML.',
-    });
-    if (notes === null) return;
-
-    await updateGame(gameId, {
-      customTitle: name.trim() || undefined,
-      tags: tagsText
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .slice(0, 20),
-      notes,
-    });
-    notify.success('Details updated');
-    refresh();
+    await openGameEditor({ game: record, onSaved: () => refresh() });
   }
 
   async function removeEntry(): Promise<void> {
@@ -703,7 +723,7 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
     const shots = await screenshotsRepo.listForGame(gameId);
     shotsHost.textContent = '';
     if (shots.length === 0) {
-      shotsHost.appendChild(el('p', { className: 'muted', text: 'No screenshots yet. Press F9 or use the Screenshot button while playing.' }));
+      shotsHost.appendChild(el('p', { className: 'muted', text: 'No screenshots yet. Use the Screenshot button while playing, or its keyboard shortcut.' }));
       return;
     }
     shotsHost.appendChild(
@@ -823,6 +843,17 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
             text: `These codes apply to ${title} only.`,
           }),
           cheatsHost,
+        ],
+      }),
+      el('div', {
+        className: 'card',
+        children: [
+          el('h2', { text: 'Links' }),
+          el('p', {
+            className: 'small muted',
+            text: 'Anything you want to keep next to this game — its project page, a guide, a notes file. Stored on this device and never opened, checked or sent anywhere by BrowserGBA.',
+          }),
+          linksHost,
         ],
       }),
       el('div', {

@@ -15,9 +15,16 @@ Cross-Origin-Embedder-Policy: require-corp
 ```
 
 Without them `window.crossOriginIsolated` is `false`, `SharedArrayBuffer` is
-unavailable, and the core cannot start. BrowserGBA detects this before mounting
-the player and explains it in the UI rather than failing with a blank screen —
-but playback is genuinely impossible, so treat the headers as mandatory.
+unavailable, and the core cannot start. BrowserGBA detects this before mounting the
+player and explains it in the UI rather than failing with a blank screen.
+
+Sending them from the host is the right answer, and it is what you should do whenever
+you can. It is not the only one, though: if the host cannot be configured (GitHub
+Pages, an internal file server, a deployment you do not control), the app's own
+service worker supplies the same two headers on the responses it answers with, which
+makes the page isolated after a single reload. That mechanism is documented under
+[Hosts that cannot send headers](#hosts-that-cannot-send-headers) below, and it is
+covered by tests rather than assumed.
 
 Consequences to keep in mind:
 
@@ -70,10 +77,73 @@ header {
 header /sw.js Cache-Control "no-cache"
 ```
 
-**GitHub Pages cannot do this.** It does not let you set response headers, so a
-project hosted there will load the library but cannot play games. Use a host with
-header support (or a service worker that synthesises the headers — do not do that;
-the browser trusts the network response, not the worker's, for isolation).
+**GitHub Pages cannot set headers** — see the next section, which is what this
+project's own deployment at <https://sumankayal247.github.io/BrowserGBA/> relies on.
+
+## Hosts that cannot send headers
+
+A host that sends no headers still produces a fully playable site. The trick is that
+the app already registers a service worker for offline support, and a response that
+comes *from a service worker of the same origin* counts as a network response for
+isolation purposes: if it carries `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`, the document it delivers is
+cross-origin isolated. This is verified by automated tests (`npm run test:e2e`), not
+assumed: the suite runs one origin with the headers, one with none, and one
+embedding the app cross-origin, and asserts what each one can do.
+
+The sequence on a header-less host:
+
+1. **First visit** — the page is not isolated, so the emulator refuses to start. The
+   library, imports, exports and settings all work. The player shows
+   *“This page is not cross-origin isolated”* with a button,
+   **Enable playback (reloads once)**; the Compatibility screen offers the same
+   action as **Take over now (reloads once)**.
+2. **Pressing the button** waits for the worker to become the active controller of
+   this page (reloading before that would produce another non-isolated document and
+   waste the click), then reloads once.
+3. **Second visit** — every response now carries the headers, the document is
+   isolated, `SharedArrayBuffer` exists, and the game runs. Nothing is asked of the
+   user in the normal case: the worker was installed on the first visit, so coming
+   back later is enough.
+
+BrowserGBA never reloads the page on its own. There is no auto-repair, no redirect
+loop, and no state is touched: the worker changes response headers only, and the
+headers it adds are the ones a correctly configured host would have sent anyway.
+
+Limits worth knowing:
+
+- **A frame can never be isolated.** Browsers do not grant cross-origin isolation to
+  a nested document, whatever headers arrive, so inside an `<iframe>` on someone
+  else's site the app says exactly that and offers *Open in a new tab* instead of
+  pretending to fix it. The library, imports and exports still work in the frame.
+- **HTTPS (or localhost) is required**, because a worker cannot be registered
+  otherwise. On plain HTTP from a non-local origin nothing can help, and the app
+  says so.
+- **Nothing else on the origin is affected**, and nothing outside it is: the worker
+  only intercepts same-origin requests, and `docs/ARCHITECTURE.md` records that
+  third-party requests are passed through untouched.
+
+## GitHub Pages deployment
+
+`.github/workflows/deploy-pages.yml` builds and publishes the site. It runs on
+pushes to `arena` and `main`, and can be started by hand from the Actions tab
+(`workflow_dispatch`). It runs `npm ci`, then `npm run check` (type-check + unit
+tests) before `npm run build`, so a red build never reaches the published site, and
+uploads `dist/` with `actions/upload-pages-artifact@v4` for
+`actions/deploy-pages@v4`.
+
+**One manual step per repository**, because the API does not expose it to
+deploy tokens: set **Settings → Pages → Build and deployment → Source:
+GitHub Actions**. Without it the workflow's deploy job fails with a Pages-related
+error and the site URL stays empty. After that, the site lives at
+`https://<user>.github.io/<repo>/` — for this repository,
+<https://sumankayal247.github.io/BrowserGBA/>.
+
+Because Pages cannot send response headers, the deployed site is the case described
+above: the first visit registers the worker and everything except playback works,
+and playback follows on the next visit or immediately via the button. `base: './'`
+in `vite.config.ts` means the same build works at the root of a domain and in a
+repository sub-path.
 
 ## MIME types and caching
 
@@ -97,6 +167,17 @@ not blocked by it.
 cached** — they live in IndexedDB, which the cache cannot see. Clearing site data
 or bumping the cache version can never destroy progress.
 
+The worker also answers with the isolation headers when the host does not supply
+them (see [Hosts that cannot send headers](#hosts-that-cannot-send-headers)). Two
+invariants follow, and `npm run test:e2e` asserts both: the worker must reach
+`activated` — a worker that throws during evaluation installs as "registered but
+never active", which looks fine and isolates nothing — and the responses it returns
+must actually carry `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. The template documents why the
+isolation headers are only set on responses it produced itself (opaque and 3xx/204
+responses are passed through untouched, since they cannot carry headers and cannot be
+a document anyway).
+
 The build **fails** if a placeholder is left unsubstituted. That guard exists
 because a worker that throws during evaluation installs as "registered but never
 active": the app looks fine and simply never works offline. `npm run test:e2e`
@@ -106,10 +187,12 @@ appear in the two `const` declarations at the top of the template.
 
 ## Releasing a new version
 
-1. `npm run check` (type-check + unit tests), then
-   `npm run test:browser` and `npm run test:e2e` with a Chromium binary available.
+1. `npm run check` (type-check + unit tests), then `npm run test:browser` and
+   `npm run test:e2e` with a browser available (`BROWSERGBA_CHROMIUM`, or
+   `BROWSERGBA_FIREFOX` to run the same checks in Gecko).
 2. `npm run build`.
-3. Deploy `dist/` with the headers above.
+3. Deploy `dist/` with the headers above, or push to `arena`/`main` and let the
+   Pages workflow publish it.
 4. The service worker version is derived from the build time, so returning users
    get the new shell on the next load; nothing needs to be invalidated by hand.
 

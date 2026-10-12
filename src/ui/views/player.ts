@@ -13,12 +13,13 @@ import { el, replace, formatRelativeTime, humanBytes } from '@/ui/dom';
 import { notify } from '@/ui/toast';
 import { confirmDialog, openDialog } from '@/ui/dialog';
 import { FILTERS, filterStyles, type FilterId } from '@/render/display';
-import { GBA_BUTTONS, type GbaButton } from '@/input/bindings';
+import { GBA_BUTTONS, keyLabel, type GbaButton, type InputAction } from '@/input/bindings';
 import { cheatsRepo } from '@/storage/records';
 import { getRomBytes, getGame, titleOf } from '@/library/library';
 import { MgbaCore } from '@/emulator/mgba-adapter';
 import { blockingIssues } from '@/emulator/environment';
 import { PlayerController, applyViewport } from '@/app/player';
+import { enableCrossOriginIsolation, isolationFailureMessage } from '@/pwa/register';
 import { notice, type ViewContext, type ViewInstance } from '@/app/app';
 import { formatDuration } from '@/storage/quota';
 
@@ -55,10 +56,30 @@ export async function renderPlayerView(context: ViewContext): Promise<ViewInstan
   const environment = app.refreshEnvironment();
   const blockers = blockingIssues(environment);
   if (blockers.length > 0) {
+    // The host may simply not send the isolation headers (GitHub Pages cannot). The
+    // service worker can supply them, which costs one reload — offer that as a button
+    // rather than reloading the page on the user's behalf.
+    const isolationButton = environment.canSelfIsolate
+      ? el('button', {
+          className: 'btn btn-primary',
+          text: 'Enable playback (reloads once)',
+          attrs: { type: 'button' },
+          on: {
+            click: async () => {
+              const outcome = await enableCrossOriginIsolation();
+              if (!outcome.reloading && !outcome.isolated) {
+                notify.warning('Playback is still blocked', isolationFailureMessage(outcome.reason));
+              }
+            },
+          },
+        })
+      : null;
+
     return {
       element: el('div', {
         children: [
           notice('danger', blockers[0]!.label, blockers[0]!.detail, [
+            isolationButton,
             environment.isEmbedded
               ? el('a', {
                   className: 'btn btn-primary',
@@ -385,18 +406,29 @@ export async function renderPlayerView(context: ViewContext): Promise<ViewInstan
 
   controller.onToggleFullscreen = () => void toggleFullscreen();
 
+  /**
+   * `" (F2)"` for a bound key, or `""` when the action has no key at all.
+   *
+   * Tooltips read the user's own keyboard map, so remapping a shortcut cannot leave
+   * a button advertising a key that no longer does anything.
+   */
+  const shortcut = (action: InputAction): string => {
+    const code = app.settings.keyboard[action];
+    return code ? ` (${keyLabel(code)})` : '';
+  };
+
   replace(controlStrip, [
     pauseButton,
     el('button', {
       className: 'btn btn-sm',
       text: 'Save state',
-      attrs: { type: 'button', title: 'Quick save state (F5)' },
+      attrs: { type: 'button', title: `Quick save state${shortcut('quickSave')}` },
       on: { click: () => void controller.quickSave() },
     }),
     el('button', {
       className: 'btn btn-sm',
       text: 'Load state',
-      attrs: { type: 'button', title: 'Quick load state (F8)' },
+      attrs: { type: 'button', title: `Quick load state${shortcut('quickLoad')}` },
       on: { click: () => void controller.quickLoad() },
     }),
     el('button', {
@@ -409,18 +441,18 @@ export async function renderPlayerView(context: ViewContext): Promise<ViewInstan
       'Fast-forward',
       () => controller.beginFastForward(),
       () => controller.endFastForward(),
-      { title: 'Hold to fast-forward (Space)' },
+      { title: `Hold to fast-forward${shortcut('fastForward')}` },
     ),
     holdButton(
       'Rewind',
       () => controller.startRewind(),
       () => controller.stopRewind(),
-      { title: 'Hold to rewind (R) — enable rewind in settings first' },
+      { title: `Hold to rewind${shortcut('rewind')} — enable rewind in settings first` },
     ),
     el('button', {
       className: 'btn btn-sm',
       text: 'Screenshot',
-      attrs: { type: 'button', title: 'Screenshot (F9)' },
+      attrs: { type: 'button', title: `Screenshot${shortcut('screenshot')}` },
       on: { click: () => void controller.screenshot() },
     }),
     el('button', {

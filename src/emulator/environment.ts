@@ -6,10 +6,60 @@
  * documents. Rather than failing with a blank canvas, the app asks these
  * questions up front and explains what is missing.
  *
- * Everything here is feature detection — there is no user-agent sniffing.
+ * Behaviour is decided by feature detection, never by sniffing the browser. The
+ * one exception is `detectEngine()`, which identifies the engine *for display* so a
+ * user can report which browser they were on; it never gates a feature.
  */
 
 export type CapabilitySeverity = 'blocking' | 'advisory';
+
+/** Browser engines this project is aware of. `unknown` still works; we just do not label it. */
+export type EngineId = 'firefox' | 'chromium' | 'safari' | 'unknown';
+
+export interface EngineInfo {
+  id: EngineId;
+  /** Human-readable product name, e.g. "Firefox". */
+  label: string;
+  /** Version number when it could be read, otherwise null. */
+  version: string | null;
+}
+
+/**
+ * Identifies the engine for the compatibility screen.
+ *
+ * Only ever used for a label — no capability decision is made from this, and every
+ * check below is a real feature test, because a wrong (or spoofed) user agent must
+ * not change what the app thinks it can do.
+ */
+export function detectEngine(): EngineInfo {
+  const ua = globalThis.navigator?.userAgent ?? '';
+  // Major version only: that is the granularity support questions need, and the
+  // trailing build numbers of Chromium-family agents are noise.
+  const version = (pattern: RegExp): string | null => pattern.exec(ua)?.[1] ?? null;
+
+  // Firefox reports "Firefox/x" on desktop/Android, and "FxiOS/x" on iOS.
+  if (/Firefox\//.test(ua) && !/FxiOS/.test(ua)) {
+    return { id: 'firefox', label: 'Firefox', version: version(/Firefox\/(\d+)/) };
+  }
+  // Every browser on iOS is WebKit underneath, and its constraints are Safari's —
+  // saying "Firefox" there would point support in the wrong direction.
+  if (/FxiOS\//.test(ua)) {
+    return { id: 'safari', label: 'Firefox on iOS', version: version(/FxiOS\/(\d+)/) };
+  }
+  if (/CriOS\//.test(ua)) {
+    return { id: 'safari', label: 'Chrome on iOS', version: version(/CriOS\/(\d+)/) };
+  }
+  if (/EdgiOS\//.test(ua)) {
+    return { id: 'safari', label: 'Edge on iOS', version: version(/EdgiOS\/(\d+)/) };
+  }
+  if (/Edg\//.test(ua)) return { id: 'chromium', label: 'Edge', version: version(/Edg\/(\d+)/) };
+  if (/OPR\//.test(ua)) return { id: 'chromium', label: 'Opera', version: version(/OPR\/(\d+)/) };
+  if (/Chrome\//.test(ua)) return { id: 'chromium', label: 'Chrome', version: version(/Chrome\/(\d+)/) };
+  if (/Safari\//.test(ua) && /Version\//.test(ua)) {
+    return { id: 'safari', label: 'Safari', version: version(/Version\/(\d+(?:\.\d+)?)/) };
+  }
+  return { id: 'unknown', label: 'This browser', version: null };
+}
 
 export interface CapabilityIssue {
   id: string;
@@ -40,6 +90,16 @@ export interface EnvironmentReport {
   canUseServiceWorker: boolean;
   /** True when the page is served from a secure context. */
   isSecureContext: boolean;
+  /** Vibration API: present in Chromium on Android, absent in Firefox and on iOS. */
+  hasVibration: boolean;
+  /** Browser engine, for display and support only (never used to gate a feature). */
+  engine: EngineInfo;
+  /**
+   * True when the page is *not* cross-origin isolated but could still become so:
+   * a service worker can answer the navigation with the isolation headers, which is
+   * how the app works on hosts that cannot set headers (GitHub Pages).
+   */
+  canSelfIsolate: boolean;
   issues: CapabilityIssue[];
   /** One-line summary for the UI status bar. */
   summary: string;
@@ -90,6 +150,9 @@ export function detectEnvironment(override?: Partial<EnvironmentReport>): Enviro
     }
   })();
 
+  const canUseServiceWorker =
+    typeof navigator !== 'undefined' && 'serviceWorker' in navigator && globalThis.isSecureContext === true;
+
   const report: EnvironmentReport = {
     canRunEmulator: false,
     crossOriginIsolated,
@@ -104,13 +167,26 @@ export function detectEnvironment(override?: Partial<EnvironmentReport>): Enviro
     hasPointerEvents: typeof globalThis.PointerEvent === 'function',
     hasTouch: typeof navigator !== 'undefined' && (navigator.maxTouchPoints ?? 0) > 0,
     isEmbedded,
-    canUseServiceWorker:
-      typeof navigator !== 'undefined' && 'serviceWorker' in navigator && globalThis.isSecureContext === true,
+    canUseServiceWorker,
+    hasVibration:
+      typeof navigator !== 'undefined' && typeof (navigator as { vibrate?: unknown }).vibrate === 'function',
+    engine: detectEngine(),
+    // A frame cannot be isolated (the browser withholds it from nested documents),
+    // so only a top-level document can fix this for itself.
+    canSelfIsolate: false,
     isSecureContext: globalThis.isSecureContext === true,
     issues: [],
     summary: '',
     ...override,
   };
+
+  // A frame can never be isolated (browsers withhold it from nested documents) and
+  // an insecure origin cannot register the worker that would supply the headers, so
+  // those two cases have nothing to offer. Everything else can be repaired from
+  // inside the page. Computed here rather than at construction so it reflects any
+  // overrides the caller applied above.
+  report.canSelfIsolate =
+    !report.crossOriginIsolated && !report.isEmbedded && report.canUseServiceWorker;
 
   // The threaded core needs SharedArrayBuffer. Without it the wasm module
   // cannot even be instantiated, so this is blocking, not advisory.
@@ -130,7 +206,9 @@ export function detectEnvironment(override?: Partial<EnvironmentReport>): Enviro
       label: 'This page is not cross-origin isolated',
       detail: report.isEmbedded
         ? 'BrowserGBA runs inside an embedded frame here, and browsers only grant cross-origin isolation to a top-level page. Open BrowserGBA in its own browser tab to play. (The library, imports, exports and backups all still work in this frame.)'
-        : 'The emulator core is threaded and needs SharedArrayBuffer, which the browser only grants to cross-origin isolated pages. The server must send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` — see docs/DEPLOYMENT.md.',
+        : report.canSelfIsolate
+          ? 'The emulator core is threaded and needs SharedArrayBuffer, which is only granted to cross-origin isolated pages. This host does not send the isolation headers, so BrowserGBA is trying to supply them itself through its service worker — if this message stays, open the app in a new tab, or serve it with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (see docs/DEPLOYMENT.md).'
+          : 'The emulator core is threaded and needs SharedArrayBuffer, which the browser only grants to cross-origin isolated pages. The server must send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` — see docs/DEPLOYMENT.md.',
     });
   }
   if (!report.hasWebGl2 && !report.hasWebGl) {

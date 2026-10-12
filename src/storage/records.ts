@@ -5,6 +5,7 @@
  * query the app needs has a name here, which keeps the schema knowledge in one
  * place and makes it obvious what each store is for.
  */
+import type { GameLink } from '@/library/links';
 import { STORE, StorageError, count, request, transact, type StoreName } from './db';
 
 export interface GameRecord {
@@ -29,6 +30,13 @@ export interface GameRecord {
   favourite: boolean;
   tags: string[];
   notes: string;
+  /**
+   * Links the user attached to this game, stored locally and never fetched.
+   *
+   * Optional so records written before this field existed (and older backup
+   * bundles) load unchanged; `normalizeLinks()` fills in an empty list on read.
+   */
+  links?: GameLink[];
 }
 
 export interface RomRecord {

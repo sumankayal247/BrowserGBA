@@ -17,6 +17,14 @@
  *
  * Requests to other origins are never intercepted or cached, so the app cannot
  * become an accidental proxy for third-party content.
+ *
+ * The worker also *supplies* the cross-origin isolation headers when the host does
+ * not. The emulator core is threaded and needs SharedArrayBuffer, which browsers
+ * only grant to an isolated document, and some hosts (notably GitHub Pages) cannot
+ * send response headers at all. A service worker can set them on the responses it
+ * returns, which makes such a host fully playable: the first visit registers the
+ * worker and reloads once, and from then on every response carries the headers.
+ * On a host that already sends them this is a no-op.
  */
 
 const CACHE_VERSION = '__CACHE_VERSION__';
@@ -27,6 +35,34 @@ const RUNTIME_CACHE = `browsergba-runtime-${CACHE_VERSION}`;
 
 /** Core binaries are large; fetch them on first use rather than at install. */
 const RUNTIME_ASSETS = ['./mgba/mgba.js', './mgba/mgba.wasm'];
+
+/** The headers a top-level document needs before browsers expose SharedArrayBuffer. */
+const ISOLATION_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+};
+
+/**
+ * Returns the response with the isolation headers set.
+ *
+ * A response the browser already produced stays usable: the headers are copied and
+ * the body streamed into a new response, which is what lets the isolation work on a
+ * host that sends none. Opaque and body-less statuses are passed through untouched —
+ * they cannot carry headers and cannot be a document anyway.
+ */
+function withIsolationHeaders(response) {
+  if (!response || response.type === 'opaque' || response.type === 'opaqueredirect') return response;
+  if (response.status < 200 || response.status === 204 || response.status === 205 || response.status === 304) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(ISOLATION_HEADERS)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -64,6 +100,9 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data === 'skip-waiting') void self.skipWaiting();
+  // Lets the page confirm the worker is answering before it reloads itself for
+  // isolation; see src/pwa/register.ts.
+  if (event.data === 'ping') event.source?.postMessage('pong');
   if (event.data === 'clear-caches') {
     event.waitUntil(
       (async () => {
@@ -89,7 +128,7 @@ self.addEventListener('fetch', (event) => {
   // handle range requests and navigation requests normally.
   if (request.headers.has('range')) return;
 
-  event.respondWith(handleRequest(request));
+  event.respondWith(handleRequest(request).then(withIsolationHeaders));
 });
 
 async function handleRequest(request) {

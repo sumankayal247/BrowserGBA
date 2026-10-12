@@ -89,23 +89,53 @@ Notable decisions:
 ## Cross-origin isolation
 
 `environment.ts` probes the browser (wasm, `SharedArrayBuffer`, isolation, WebGL,
-IndexedDB, audio, gamepad, touch, embedding, secure context) and produces a
-report with *blocking* and *advisory* issues. The player refuses to start on a
-blocking issue and explains it; the compatibility screen renders the same report.
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the headers that make isolation possible.
+IndexedDB, audio, gamepad, touch, embedding, secure context, browser engine) and
+produces a report with *blocking* and *advisory* issues. The player refuses to start
+on a blocking issue and explains it; the compatibility screen renders the same
+report. Nothing is gated on the detected engine: it labels the report, it does not
+decide what runs.
+
+`pwa/register.ts` can arrange isolation the host did not send, by letting the
+service worker answer with the two headers browsers require — see
+[DEPLOYMENT.md](DEPLOYMENT.md) for the full sequence. It is always user-initiated
+(one button, one reload), it refuses inside a frame where it could never work, and
+the module is explicit that it changes response headers only: ROMs, saves, states and
+cheats are untouched by it.
+
+## Links and metadata editing
+
+`library/links.ts` owns the per-game link list. Its contract is deliberately narrow:
+
+- any address the user pastes is stored and displayed as pasted — no allow-list, no
+  deny-list, no reputation lookup, no network request to test a destination (see the
+  link policy in `GAME_PLAN.md`);
+- the one rule is execution safety, and it is about the string rather than its
+  destination: `javascript:`, `data:` and `vbscript:` URLs are rendered as plain text
+  instead of anchors, so a pasted value can never run code in the page;
+- length and count caps (2000 / 80 / 50) are storage hygiene, not policy.
+
+`ui/edit-game.ts` is the single editor for a game's display name, cover, tags, notes
+and links, opened from the pencil button on every library card. Edits touch metadata
+records only — never the ROM bytes, the content hash, or save data.
 
 ## Testing layers
 
 | Layer | Runs | Covers |
 | --- | --- | --- |
-| `tests/*.test.ts` (vitest + happy-dom + fake-indexeddb) | `npm run test` | validation, storage, library, cheats, session state machine, bindings |
-| `tests/browser/run-smoke.mjs` + `boot.html` | `npm run test:browser` | the real comp
-iled core: boot, framebuffer, input, saves, states, rewind |
-| `tests/browser/run-app.mjs` | `npm run test:e2e` | the real UI in a real browser: import → play → screenshot → save → cheat → remap → offline shell |
+| `tests/*.test.ts` (vitest + happy-dom + fake-indexeddb) | `npm run test` | validation, storage, library, cheats, session state machine, bindings, keyboard defaults, links, environment detection, portability (no Chromium-only APIs or too-new CSS) |
+| `tests/browser/run-smoke.mjs` + `boot.html` | `npm run test:browser` | the real compiled core: boot, framebuffer, input, saves, states, rewind |
+| `tests/browser/run-app.mjs` | `npm run test:e2e` | the real UI in a real browser: import → play → screenshot → battery save → export → metadata editing → cheat → remap → duplicate import → three-origin isolation and embed refusal → offline shell |
 
-The browser suites need a Chromium binary (`BROWSERGBA_CHROMIUM=/path/to/chrome`,
-falling back to `/tmp/chromium` and system paths) and skip themselves with an
+The browser suites need a browser binary (`BROWSERGBA_CHROMIUM=/path/to/chrome`,
+falling back to `/tmp/chromium` and system paths; `BROWSERGBA_FIREFOX=/path/to/firefox`
+runs the same checks in Gecko over WebDriver BiDi) and skip themselves with an
 explanation when none is available. They never download a browser.
+
+The end-to-end suite deliberately drives real user gestures — `uploadFile` on the
+actual file input, real mouse clicks on real buttons — rather than calling internal
+functions, and captures downloads by patching `URL.createObjectURL` inside the page
+instead of using Chromium-only browser-protocol APIs, which is what lets the same
+suite run in either engine.
 
 ## Extension points (not implemented)
 

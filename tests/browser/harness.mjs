@@ -9,6 +9,9 @@
  * The browser is intentionally *not* downloaded by this project: CI provides one
  * via `BROWSERGBA_CHROMIUM`, and the scripts explain themselves and skip when it
  * is missing instead of failing a build for an unrelated reason.
+ *
+ * Point `BROWSERGBA_FIREFOX` at a Firefox build and the same suites run in Gecko
+ * instead. See `launchBrowser()` for what that changes.
  */
 import { access, readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -38,9 +41,82 @@ export async function findChromium() {
   return null;
 }
 
+const FIREFOX_CANDIDATES = [
+  process.env.BROWSERGBA_FIREFOX,
+  '/usr/bin/firefox',
+  '/usr/bin/firefox-esr',
+  '/usr/lib/firefox/firefox',
+  '/snap/bin/firefox',
+  '/Applications/Firefox.app/Contents/MacOS/firefox',
+].filter(Boolean);
+
+export async function findFirefox() {
+  for (const candidate of FIREFOX_CANDIDATES) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      /* keep looking */
+    }
+  }
+  return null;
+}
+
+/**
+ * Launches the browser the suites should run in.
+ *
+ * Chromium is the default because it is what CI has. Setting `BROWSERGBA_FIREFOX`
+ * (or having a Firefox binary in the usual place) switches the same checks to
+ * Firefox: the app is expected to behave identically there, and the differences are
+ * real — Gecko refuses `navigator.vibrate` on desktop, partitions third-party
+ * iframes' storage, and keeps F5/F9 for reload and Reader View, which is why the
+ * keyboard defaults avoid those keys.
+ *
+ * Firefox is driven over WebDriver BiDi rather than Chromium's CDP, so anything
+ * Chromium-specific (the CDP download plumbing, for instance) is skipped instead of
+ * being called and failing. The checks themselves stay the same.
+ *
+ * @returns {Promise<{ browser: import('puppeteer-core').Browser, engine: 'chromium'|'firefox', engineLabel: string } | null>}
+ */
+export async function launchBrowser({ headless = true } = {}) {
+  const { default: puppeteer } = await import('puppeteer-core');
+  const firefox = process.env.BROWSERGBA_FIREFOX ? await findFirefox() : null;
+
+  if (firefox) {
+    console.log(`[harness] launching Firefox at ${firefox}`);
+    const browser = await puppeteer.launch({
+      browser: 'firefox',
+      executablePath: firefox,
+      headless,
+      protocol: 'webDriverBiDi',
+      extraPrefsFirefox: {
+        // SharedArrayBuffer behind COOP/COEP is on by default in current Firefox;
+        // set explicitly so an enterprise profile cannot silently cost the core its
+        // threads and turn the emulator into a slow single-threaded build.
+        'javascript.options.shared_memory': true,
+        'dom.postMessage.sharedArrayBuffer.withCOOP_COEP': true,
+        // The suites open cross-origin windows/iframes on 127.0.0.1 and expect the
+        // app's service worker to be usable there.
+        'dom.serviceWorkers.enabled': true,
+        'browser.tabs.warnOnClose': false,
+      },
+    });
+    return { browser, engine: 'firefox', engineLabel: 'Firefox' };
+  }
+
+  const chromium = await findChromium();
+  if (!chromium) return null;
+  const browser = await puppeteer.launch({
+    executablePath: chromium,
+    headless,
+    args: CHROMIUM_ARGS,
+  });
+  return { browser, engine: 'chromium', engineLabel: 'Chromium' };
+}
+
 export function skipMessage(script) {
-  console.log(`[${script}] SKIPPED — no Chromium binary found.`);
-  console.log(`[${script}] Set BROWSERGBA_CHROMIUM=/path/to/chrome to enable this check.`);
+  console.log(`[${script}] SKIPPED — no browser binary found.`);
+  console.log(`[${script}] Set BROWSERGBA_CHROMIUM=/path/to/chrome (or BROWSERGBA_FIREFOX=/path/to/firefox) to enable this check.`);
 }
 
 const MIME_TYPES = {
@@ -153,6 +229,69 @@ export async function clickButton(page, text, root = 'body') {
     { timeout: 15000, polling: 100 },
     text,
     root,
+  );
+  await handle.asElement().click();
+}
+
+/**
+ * Returns an element handle, waiting for the view to finish rendering.
+ *
+ * Views are rendered asynchronously (the library re-reads IndexedDB on every
+ * navigation), so `page.$` right after changing the route can legitimately return
+ * `null`. Polling here removes a whole class of flaky failures.
+ */
+export async function waitForElement(page, selector, { timeout = 20000, interval = 250 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const handle = await page.$(selector).catch(() => null);
+    if (handle) return handle;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+}
+
+/** Like `waitForElement`, but throws instead of returning `null`. */
+export async function requireElement(page, selector, description = selector) {
+  const handle = await waitForElement(page, selector);
+  if (!handle) throw new Error(`the page never rendered ${description}`);
+  return handle;
+}
+
+/**
+ * Closes any toasts that are on screen.
+ *
+ * Toasts sit in a fixed region at the bottom right and accept pointer events, so one
+ * left over from an earlier step can sit on top of the button the next step wants to
+ * press — a real click then lands on the toast and quietly does nothing.
+ */
+export async function dismissToasts(page) {
+  await page.evaluate(() => {
+    for (const button of document.querySelectorAll('.toast .toast-close')) {
+      button.click();
+    }
+  });
+  await page.waitForFunction(() => document.querySelectorAll('.toast').length === 0, { timeout: 5000 });
+}
+
+/**
+ * Clicks a button inside the `.card` whose `<h2>` matches `heading`.
+ *
+ * The game screen has several lists that each end in their own action buttons
+ * ("Save states", "Battery saves", …), so "the Export button" is ambiguous by
+ * text alone; naming the card keeps the test honest about which one it presses.
+ */
+export async function clickButtonInCard(page, heading, text) {
+  const handle = await page.waitForFunction(
+    (headingText, label) => {
+      const card = [...document.querySelectorAll('.card')].find(
+        (node) => node.querySelector('h2')?.textContent?.trim() === headingText,
+      );
+      const buttons = [...(card?.querySelectorAll('button') ?? [])];
+      return buttons.find((button) => button.textContent?.trim() === label) ?? null;
+    },
+    { timeout: 15000, polling: 100 },
+    heading,
+    text,
   );
   await handle.asElement().click();
 }
@@ -391,8 +530,11 @@ export async function waitForSettings(page, predicate, { timeout = 20000, interv
 export function logChecks(script, checks) {
   console.log(`\n[${script}] checks:`);
   let failure = null;
-  for (const [label, pass] of checks) {
+  for (const [label, pass, detail] of checks) {
     console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${label}`);
+    // Failing checks carry the measured value as an optional third element; showing
+    // it here is what makes a failure diagnosable from CI output alone.
+    if (!pass && detail !== undefined) console.log(`        ${String(detail).slice(0, 400)}`);
     if (!pass && !failure) failure = label;
   }
   return failure;

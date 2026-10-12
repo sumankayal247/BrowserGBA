@@ -19,8 +19,12 @@
       iframe. BrowserGBA must detect that, explain it, and offer to open in its
       own tab rather than failing mysteriously. This page is how the test proves
       it.
+
+      The suite points the frame at the app's own origin (a different origin from
+      this page) once the probe is loaded, so the `src` here is only a placeholder
+      that keeps the document valid on its own.
     -->
     <header>Non-isolated embedding probe — no COOP/COEP is sent for this page.</header>
-    <iframe src="/" title="BrowserGBA inside an iframe" allow="gamepad; fullscreen"></iframe>
+    <iframe src="about:blank" title="BrowserGBA inside an iframe" allow="gamepad; fullscreen"></iframe>
   </body>
 </html>

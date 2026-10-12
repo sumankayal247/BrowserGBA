@@ -76,9 +76,9 @@ export const DEFAULT_KEYBOARD_MAP: Record<InputAction, string> = {
   Select: 'ShiftRight',
   fastForward: 'Space',
   rewind: 'KeyR',
-  quickSave: 'F5',
-  quickLoad: 'F8',
-  screenshot: 'F9',
+  quickSave: 'F2',
+  quickLoad: 'F4',
+  screenshot: 'F8',
   togglePause: 'Escape',
   toggleMenu: 'KeyM',
   toggleMute: 'KeyN',
@@ -121,14 +121,24 @@ export class BindingError extends Error {
 /**
  * Keys we refuse to bind because the browser or the operating system needs them.
  * Rebinding these would break the page in ways users cannot easily undo.
+ *
+ * The list is deliberately about *this app's* ability to receive the key, and it is
+ * checked against both browsers we target:
+ *
+ *   F1  help, F3 find-again, F5 reload, F6 address bar, F7 caret browsing,
+ *   F9  Reader View (Firefox), F10 menu bar, F11 fullscreen, F12 developer tools
+ *
+ * A page cannot cancel those, so a game bound to one of them would appear to ignore
+ * the key — or worse, reload the page in the middle of a battle. F2, F4 and F8 are
+ * free in Chromium and Firefox alike and are what the defaults use.
  */
 export const RESERVED_CODES = new Set([
   'F1',
-  'F2',
   'F3',
-  'F4',
+  'F5',
   'F6',
   'F7',
+  'F9',
   'F10',
   'F11',
   'F12',
@@ -139,6 +149,36 @@ export const RESERVED_CODES = new Set([
   'ContextMenu',
   'PrintScreen',
 ]);
+
+/**
+ * Shortcuts already stored in settings that this release would refuse to bind.
+ *
+ * Older builds offered F5/F9 for quick save and screenshots. Browsers keep those
+ * keys for themselves, so a player who upgrades keeps a shortcut that quietly
+ * reloads the page; the settings screen uses this to say so and offer a rebind.
+ */
+export function reservedBindings(map: KeyboardMap): Array<{ action: InputAction; code: string }> {
+  return (Object.entries(map) as Array<[InputAction, string]>)
+    .filter(([, code]) => Boolean(code) && RESERVED_CODES.has(code))
+    .map(([action, code]) => ({ action, code }));
+}
+
+/**
+ * Human-readable key names for `KeyboardEvent.code` values, shared by the settings
+ * screen and the in-player button tooltips so they can never disagree.
+ */
+export function keyLabel(code: string): string {
+  if (!code) return 'unassigned';
+  return code
+    .replace(/^Key/, '')
+    .replace(/^Digit/, '')
+    .replace(/^Arrow/, '')
+    .replace(/^Numpad/, 'Numpad ')
+    .replace(/(Left|Right)$/, ' $1')
+    .replace(/^BracketLeft$/, '[')
+    .replace(/^BracketRight$/, ']')
+    .trim();
+}
 
 export function validateBinding(action: string, code: string): void {
   if (!isGbaButton(action) && !isEmulatorAction(action)) {

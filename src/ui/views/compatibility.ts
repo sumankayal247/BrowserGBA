@@ -17,6 +17,8 @@ import {
 import { blockingIssues, detectEnvironment } from '@/emulator/environment';
 import { GBA_BUTTONS, DEFAULT_KEYBOARD_MAP, ACTION_LABELS, type InputAction } from '@/input/bindings';
 import { FILTERS } from '@/render/display';
+import { notify } from '@/ui/toast';
+import { enableCrossOriginIsolation, isolationFailureMessage } from '@/pwa/register';
 import { notice, type ViewContext, type ViewInstance } from '@/app/app';
 
 const LEVEL_LABELS: Record<SupportLevel, string> = {
@@ -101,8 +103,53 @@ export function renderCompatibilityView(_context: ViewContext): ViewInstance {
       live('Fullscreen', environment.hasFullscreen, 'Immersive play'),
       live('Service worker', environment.canUseServiceWorker, 'Offline launch'),
       live('Secure context', environment.isSecureContext, 'Required for offline and storage persistence'),
+      live('Vibration', environment.hasVibration, 'Haptic feedback on touch buttons'),
+      live(
+        'Browser',
+        environment.engine.version ? `${environment.engine.label} ${environment.engine.version}` : environment.engine.label,
+        'For reporting problems — features are detected, never assumed from this',
+      ),
     ],
   });
+
+  // Hosts that cannot send response headers (GitHub Pages) leave the page
+  // un-isolated, which is fixable from inside the page — say so, and offer it, only
+  // when it is actually possible.
+  const isolationButton = el('button', {
+    className: 'btn btn-sm',
+    text: 'Take over now (reloads once)',
+    attrs: { type: 'button' },
+    on: {
+      click: async () => {
+        isolationButton.disabled = true;
+        isolationButton.textContent = 'Working…';
+        const outcome = await enableCrossOriginIsolation();
+        if (!outcome.reloading && !outcome.isolated) {
+          isolationButton.disabled = false;
+          isolationButton.textContent = 'Try again';
+          notify.warning('Playback is still blocked', isolationFailureMessage(outcome.reason));
+        }
+      },
+    },
+  });
+
+  if (environment.canSelfIsolate) {
+    liveEnvironment.append(
+      el('li', {
+        children: [
+          el('span', { className: 'badge badge-warn', text: '✔ fixable' }),
+          el('span', {
+            children: [
+              el('strong', { text: 'Isolation headers: ' }),
+              'this host does not send them, so the app is standing in for the server. ',
+              isolationButton,
+              ' Otherwise it happens by itself on your next visit.',
+            ],
+          }),
+        ],
+      }),
+    );
+  }
 
   function live(label: string, value: boolean | string, purpose: string): HTMLElement {
     const ok = value !== false;

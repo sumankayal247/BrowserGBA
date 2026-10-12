@@ -10,7 +10,7 @@
 
 ## 1. Product vision
 
-Create a personal retro gaming hub that runs GBA games in a modern browser. Users can import their own legally obtained `.gba` ROM files, keep a tidy local library, launch any game, save and restore progress, configure emulator behavior, and use the app on desktop or mobile. An optional online community catalog can store game metadata and moderated external resource links; it must never host ROM binaries and must not be required for local play.
+Create a personal retro gaming hub that runs GBA games in a modern browser. Users can import their own legally obtained `.gba` ROM files, keep a tidy local library, launch any game, save and restore progress, configure emulator behavior, and use the app on desktop or mobile. An optional online community catalog can store game metadata and user-submitted links exactly as pasted; it must never host ROM binaries and must not be required for local play.
 
 The experience should feel like a purpose-built retro handheld library rather than a bare emulator demo.
 
@@ -49,6 +49,8 @@ Provide a home/library screen with:
 - Grid/list views, search, sorting, favourites, recently played, and optional tags.
 - Per-game details: title, detected game code/metadata when available, file size, date added, last played, playtime if reliably tracked, and save status.
 - Custom title, cover, notes, and tags without modifying the ROM itself.
+- Every game card carries an edit control (a pencil button) that opens one editor for the display name, cover image, tags, notes and links. Editing is metadata only: it never touches the ROM bytes, the content hash, or the game's saves.
+- Free-form links per game, stored locally with the rest of the metadata. The user may paste any address they like — an official page, a wiki, a Discord invite, a shop listing, a download page, anything — and it is kept and shown exactly as pasted. The app performs **no destination checking of any kind**: no allow-list, no deny-list, no reputation lookup, no network call to see whether a link works. The single rule is execution safety, which is about the string rather than its destination: `javascript:`, `data:` and `vbscript:` URLs are rendered as plain text instead of clickable links so a pasted value can never execute in the page. Links are never uploaded anywhere and are never probed automatically.
 - Duplicate detection using a content hash (prefer SHA-256 through Web Crypto where available). Ask whether to keep, replace, or cancel when an identical ROM is imported.
 - Clear invalid-ROM, unsupported-file, duplicate, and storage-quota messages.
 - Remove-from-library action with a confirmation that explains whether associated saves/states will also be deleted. Offer export first where appropriate.
@@ -281,13 +283,20 @@ Build an optional online catalog where users can discover and contribute text me
 
 **Link and copyright policy:**
 
+The project never hosts, serves, bundles, or downloads ROM or BIOS files, and the
+catalog must never become a file host. Beyond that, **link destinations are not the
+project's business and must not be screened**: whether a link points at a homebrew
+release, a documentation page or a ROM-distribution site is a judgement for the person
+who pasted it, not for the app or the API. This applies to the user's own library
+links and to catalog entries alike.
+
 - MongoDB stores metadata and URLs only—not ROM binaries, BIOS files, save files, screenshots containing copyrighted content, or other large game assets.
-- Do not turn the catalog into a ROM-hosting, ROM-scraping, or commercial ROM-download directory. Do not provide or promote links that clearly distribute unauthorized copyrighted ROMs or BIOS files.
-- Prefer official game/project pages, homebrew releases, documentation, guides, and cheat-reference pages. Any permitted external resource categories must be defined clearly in the UI and policy.
-- Label external links as user-submitted and open them safely. Validate URL schemes (HTTPS by default; allow HTTP only if explicitly justified), reject executable or unsafe schemes, and never render submitted content as trusted HTML.
-- Add report, moderation, and removal workflows. New submissions may remain pending until approved; rate-limit submissions and edits, detect duplicates, and maintain audit timestamps.
-- Do not automatically crawl external links or fetch remote page content in the browser. If link checking is added, perform it server-side with protections against SSRF, redirects to private/internal addresses, oversized responses, and abuse.
-- Do not imply that BrowserGBA endorses or guarantees third-party links. Provide clear warnings that external sites are outside the project's control.
+- No allow-list, deny-list, blocklist or reputation check of link destinations. A generic `links` field is not a promise that any particular kind of file is available, and the UI must not imply otherwise.
+- Label external links as user-submitted, mark them as outside the project's control, and never render submitted content as trusted HTML.
+- The only link rule is execution safety, and it is not about where a link goes: `javascript:`, `data:` and `vbscript:` URLs are displayed as plain text instead of being turned into clickable links, so a pasted string can never run code in the page. Everything else — unusual schemes, `steam:`, `magnet:`, plainly wrong hosts — is stored and shown exactly as pasted. See `src/library/links.ts`.
+- Add report, moderation, and removal workflows for spam, abuse and illegal *content hosted by the catalog itself*. New submissions may remain pending until approved; rate-limit submissions and edits, detect duplicates, and maintain audit timestamps.
+- Do not automatically crawl external links or fetch remote page content, in the browser or server-side. Because no link checking happens at all, there is no fetcher to make SSRF-safe.
+- Length and count limits are hygiene, not policy: a URL is capped at 2000 characters, a label at 80, and a game at 50 links so one field cannot bloat the database or the page.
 
 **Recommended architecture:**
 
@@ -339,7 +348,24 @@ type CatalogGame = {
 };
 ```
 
-Do not make a generic `downloadLink` field a promise that commercial ROMs are available. Resource types and moderation rules must prevent the catalog from becoming a centralized source of unauthorized ROM downloads.
+Moderation covers spam, abuse and what the catalog itself stores — never the legal status of a destination. Do not shape the schema or the UI into a file-download directory (no `downloadUrl` field that the service fetches, no mirrored files, no scraping), and do not imply that a listed link is endorsed, safe, or that commercial ROMs are available.
+
+### G. Deployment and hosting
+
+- Serve the built site from any static host. The only unusual requirement is cross-origin
+  isolation for the threaded core; `docs/DEPLOYMENT.md` covers host recipes. — IMPLEMENTED
+- Work on hosts that cannot send response headers (GitHub Pages, a bare file server): the app's
+  own service worker answers with `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy`,
+  so playback is one user-initiated reload away rather than impossible. — VERIFIED by the
+  app-level browser suite across three origins (headers, none, cross-origin frame).
+- Publish this repository to GitHub Pages (`https://sumankayal247.github.io/BrowserGBA/`) from
+  `.github/workflows/deploy-pages.yml` on every push to `arena`/`main`, gated on `npm run
+  check` so a red build never reaches the site. — IMPLEMENTED. One manual, per-repository step
+  remains outside the code: set **Settings → Pages → Source: GitHub Actions**. Until that is
+  done the workflow's deploy step fails and the URL is empty.
+- The deployed site has everything except the database-backed catalog, which is Phase 7 and
+  exists nowhere yet. The README states this next to the link so the limitation is not
+  discovered by surprise.
 
 ## 6. Controls and accessibility
 
@@ -456,7 +482,11 @@ Tests must cover the feature behavior, not merely the presence of UI buttons.
 - Test save/load using fixtures designed for this purpose.
 - Do not use commercial Pokémon ROMs in CI unless the repository has explicit legal authorization; keep any personal local ROM tests local-only and out of CI.
 - Separate “core boots” from “game compatibility” claims.
-- Test a small range of desktop and mobile browsers if browser automation is available.
+- Test a small range of desktop and mobile browsers if browser automation is available. Both
+  target engines are supported by the harness: `BROWSERGBA_CHROMIUM=/path/to/chrome` or
+  `BROWSERGBA_FIREFOX=/path/to/firefox`, with the same checks and no Chromium-only calls.
+  Chromium: VERIFIED in this environment. Firefox: IMPLEMENTED path, **NOT VERIFIED** here
+  (no Firefox binary was available; see `docs/COMPATIBILITY.md`).
 
 ### Manual acceptance pass
 
@@ -539,8 +569,8 @@ Agents should implement in small increments, preserving a buildable application 
 ### Phase 7 — Online community catalog
 
 - Verify MongoDB Atlas free-tier limits and deployment requirements before committing to the provider.
-- Add a backend API and MongoDB-backed catalog for GBA game metadata and moderated external resource links only.
-- Implement validation, pagination/search, duplicate detection, moderation/reporting, rate limits, and safe external-link handling.
+- Add a backend API and MongoDB-backed catalog for GBA game metadata and user-submitted links only — links are stored as pasted and their destinations are not screened (see the link policy above).
+- Implement validation (lengths, counts, no HTML), pagination/search, duplicate detection, moderation/reporting for spam and abuse, rate limits, and safe *rendering* of untrusted text — never destination screening.
 - Keep the catalog independent from local ROM import, emulation, saves, and exports.
 - Add tests and document secrets/configuration, deployment, limits, backups, and failure behavior.
 
@@ -594,6 +624,7 @@ Every task must:
 
 - Gamepad support.
 - Custom covers, tags, playtime, recently played, favourites.
+- Per-game link lists with the no-policing rule above (implemented early, alongside the editor).
 - Configurable control layout.
 - Audio controls and fullscreen.
 - Installable offline PWA.
@@ -611,7 +642,7 @@ Every task must:
 ## 14. Non-goals for the initial release
 
 - Other console emulation.
-- Hosting, downloading, or bundling commercial ROMs or BIOS files. The online catalog may list permitted metadata and approved external reference links only.
+- Hosting, downloading, or bundling commercial ROMs or BIOS files. The online catalog stores metadata and link URLs only; it never serves files and never judges where a user's link points.
 - Accounts or cloud storage required for basic usage.
 - Multiplayer/link-cable emulation unless explicitly planned later.
 - A built-in copyrighted artwork or cheat-code scraping service.

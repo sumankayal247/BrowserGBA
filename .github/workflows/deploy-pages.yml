@@ -1,0 +1,67 @@
+# Builds BrowserGBA and publishes the static site to GitHub Pages.
+#
+# Why this works without server configuration: GitHub Pages cannot send response
+# headers, so a page there is normally NOT cross-origin isolated — and the threaded
+# emulator core needs SharedArrayBuffer, which browsers only hand to isolated
+# documents. The app's own service worker closes that gap by setting
+# Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy on the responses it
+# answers with, so playback works on Pages too, without any host configuration.
+#
+# The practical effect on the deployed site: the first visit registers the worker
+# and everything except playback is available (library, imports, backups, settings);
+# from the second visit — or immediately, via the "Enable playback" button the app
+# shows — the emulator runs. Details in docs/DEPLOYMENT.md.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - arena
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deployments race; the newer one wins.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The type checker and the unit suite gate the deploy: the site is the
+      # project's public face, and a red build should never reach it.
+      - run: npm run check
+
+      # `sync:core` runs as a prebuild step and vendors the MPL-2.0 mGBA build into
+      # public/mgba/, together with its notice and a manifest of what was copied.
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

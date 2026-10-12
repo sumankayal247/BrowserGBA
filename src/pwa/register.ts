@@ -41,6 +41,119 @@ export async function registerServiceWorker(): Promise<ServiceWorkerStatus> {
   }
 }
 
+export interface IsolationResult {
+  /** True when the document is cross-origin isolated now. */
+  isolated: boolean;
+  /** True when a reload was triggered to reach a state where it will be. */
+  reloading: boolean;
+  /** Why isolation could not be arranged, for the UI to explain. */
+  reason?: string;
+}
+
+/**
+ * Cross-origin isolation the host did not provide, arranged from inside the page.
+ *
+ * The emulator core is threaded and needs `SharedArrayBuffer`, which browsers only
+ * expose to an isolated document. Isolation normally comes from
+ * `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` response headers,
+ * and static hosts such as GitHub Pages cannot send any — but a service worker can
+ * set them on the responses it answers with. So where a host is silent, the worker
+ * this app already registers for offline support becomes the source of the headers.
+ *
+ * Two consequences, both deliberate:
+ *
+ *  - The *second* visit to such a host is already isolated, with nothing for the
+ *    user to do, because the worker is registered on the first visit and serves
+ *    every response after that.
+ *  - The first visit can ask the worker to take over immediately, at the cost of one
+ *    reload. That is what this function does, and it is only ever called from a
+ *    button the user pressed; BrowserGBA never reloads the page behind their back.
+ *
+ * It refuses to act inside an iframe, where a reload could never help (browsers do
+ * not grant isolation to a nested document, whatever headers arrive).
+ *
+ * @param options.reload Supplied by tests; production reloads the page.
+ */
+export async function enableCrossOriginIsolation(
+  options: { reload?: () => void } = {},
+): Promise<IsolationResult> {
+  if (globalThis.crossOriginIsolated === true) {
+    return { isolated: true, reloading: false, reason: 'already-isolated' };
+  }
+  if (isEmbedded()) {
+    return { isolated: false, reloading: false, reason: 'embedded' };
+  }
+  if (!canRegisterServiceWorker()) {
+    return { isolated: false, reloading: false, reason: 'no-service-worker' };
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+    await navigator.serviceWorker.ready;
+    // `ready` means the worker is active; the page only gets its headers once the
+    // worker actually controls this client. Reloading before that would produce
+    // another non-isolated document and waste the user's click.
+    const controlling = await waitForController(registration, 6000);
+    if (!controlling) {
+      return { isolated: false, reloading: false, reason: 'worker-not-controlling' };
+    }
+    const reload = options.reload ?? (() => globalThis.location.reload());
+    reload();
+    return { isolated: false, reloading: true, reason: 'reloading' };
+  } catch (error) {
+    return {
+      isolated: false,
+      reloading: false,
+      reason: error instanceof Error ? error.message : 'registration-failed',
+    };
+  }
+}
+
+/** Plain-language explanation for a failed isolation attempt. */
+export function isolationFailureMessage(reason: string | undefined): string {
+  switch (reason) {
+    case 'embedded':
+      return 'BrowserGBA cannot grant itself isolation inside a frame, and browsers never give it to a nested page. Open the app in its own tab instead.';
+    case 'no-service-worker':
+      return 'This page is not served over HTTPS (or localhost), so the service worker that could supply the isolation headers cannot be registered.';
+    case 'worker-not-controlling':
+    case 'registration-failed':
+      return 'The offline worker did not take control of this page in time. Reloading the page once usually fixes it.';
+    default:
+      return 'Cross-origin isolation could not be arranged. Serving the app with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` always works — see docs/DEPLOYMENT.md.';
+  }
+}
+
+function isEmbedded(): boolean {
+  try {
+    return globalThis.window !== undefined && globalThis.window.self !== globalThis.window.top;
+  } catch {
+    // Reading `top` threw: a cross-origin parent, which still means embedded.
+    return true;
+  }
+}
+
+async function waitForController(
+  registration: ServiceWorkerRegistration,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (navigator.serviceWorker.controller) return true;
+  return new Promise<boolean>((resolve) => {
+    const finish = (value: boolean): void => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onChange);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(Boolean(navigator.serviceWorker.controller)), timeoutMs);
+    function onChange(): void {
+      clearTimeout(timer);
+      finish(true);
+    }
+    navigator.serviceWorker.addEventListener('controllerchange', onChange);
+    // An already-activated worker may claim this client without another event.
+    void registration.update?.().catch(() => undefined);
+  });
+}
+
 /** Removes the service worker and its caches — used by the "delete everything" flow. */
 export async function unregisterServiceWorkers(): Promise<number> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return 0;

@@ -24,6 +24,8 @@ import {
   vibrate,
   type InputAction,
   type KeyboardMap,
+  keyLabel,
+  reservedBindings,
   type TouchLayoutId,
 } from '@/input/bindings';
 import { FILTERS } from '@/render/display';
@@ -34,19 +36,6 @@ import { DEFAULT_SETTINGS, resetSettings, type AppSettings } from '@/app/setting
 import { blockingIssues } from '@/emulator/environment';
 import { notice, type ViewContext, type ViewInstance } from '@/app/app';
 import { APP_VERSION, DB_SCHEMA_VERSION } from '@/version';
-
-/** Human-readable key names for `KeyboardEvent.code` values. */
-function keyLabel(code: string): string {
-  if (!code) return 'unassigned';
-  return code
-    .replace(/^Key/, '')
-    .replace(/^Digit/, '')
-    .replace(/^Arrow/, '')
-    .replace(/^Numpad/, 'Numpad ')
-    .replace(/(Left|Right)$/, ' $1')
-    .replace(/^BracketLeft$/, '[')
-    .replace(/^BracketRight$/, ']');
-}
 
 export async function renderSettingsView(context: ViewContext): Promise<ViewInstance> {
   const { app } = context;
@@ -381,12 +370,25 @@ export async function renderSettingsView(context: ViewContext): Promise<ViewInst
       rowsHost.appendChild(el('li', { className: 'list-heading', text: title }));
       for (const action of actions) rowsHost.appendChild(actionRow(action));
     }
+    // Shortcuts left over from an older build, or chosen before the browser's own
+    // keys were known about: the key works for the browser, not for the game.
+    const browserOwned = reservedBindings(map);
+
     replace(controlsHost, [
       conflicts.length > 0
         ? notice(
             'warn',
             'Some keys are bound more than once',
             'Duplicates are allowed, but the emulator can only act on one of them.',
+          )
+        : null,
+      browserOwned.length > 0
+        ? notice(
+            'warn',
+            'The browser needs some of these keys',
+            `${browserOwned
+              .map((binding) => `${ACTION_LABELS[binding.action]} = ${keyLabel(binding.code)}`)
+              .join(', ')} — the browser acts on that key first (F5 reloads the page, F9 opens Reader View in Firefox), so the emulator never sees it. Pick another key, or use Reset to defaults.`,
           )
         : null,
       rowsHost,

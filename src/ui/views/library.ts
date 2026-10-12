@@ -5,6 +5,7 @@
  * so a duplicate can be reviewed (title, size, hash prefix, existing entry)
  * before anything is written.
  */
+import { openGameEditor } from '@/ui/edit-game';
 import { el, frag, humanBytes, formatRelativeTime, replace } from '@/ui/dom';
 import { notify } from '@/ui/toast';
 import { confirmDialog } from '@/ui/dialog';
@@ -346,6 +347,20 @@ export async function renderLibraryView(context: ViewContext): Promise<ViewInsta
               text: 'Play',
               attrs: { type: 'button' },
               on: { click: () => navigate(`/play/${encodeURIComponent(game.id)}`) },
+            }),
+            el('button', {
+              className: 'btn btn-sm btn-icon',
+              text: '✏',
+              attrs: {
+                type: 'button',
+                'aria-label': `Edit ${titleOf(game)}: name, cover image and links`,
+                title: 'Edit name, cover and links',
+              },
+              on: {
+                click: () => {
+                  void openGameEditor({ game, onSaved: () => void refresh() });
+                },
+              },
             }),
             el('button', {
               className: 'btn btn-sm',
