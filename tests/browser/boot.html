@@ -147,7 +147,10 @@
 
         // Pixel (0,0) animates and pixel (239,159) is the input marker, so both
         // are excluded from the static ramp check.
-        const rampSkip = (x, y) => (x === 0 && y === 0) || (x === 239 && y === 159);
+        // Three pixels are probes rather than ramp: (0,0) animates, (239,159) is
+        // the input marker and (238,0) shows cartridge save memory.
+        const rampSkip = (x, y) =>
+          (x === 0 && y === 0) || (x === 239 && y === 159) || (x === 238 && y === 0);
         const rampBad = verifyRamp(frame1, rampSkip);
         results.rampMismatches = rampBad;
         results.rampOk = rampBad.length === 0;
@@ -195,9 +198,44 @@
         results.rampStillOk = lateBad.length === 0;
         log(`ramp still exact after input test: ${lateBad.length === 0}`, lateBad.length === 0 ? 'ok' : 'bad');
 
-        // Battery save extraction (only meaningful if the cart is backed by SRAM).
-        results.batterySave = Module.getSave()?.length ?? null;
+        // Battery save extraction. The fixture writes `frameCounter & 0xFF` to
+        // SRAM[0] on every frame, so a save of all zeros means the write never
+        // reached the cartridge's backup memory — not merely that the file is
+        // empty — which is the difference between "saves work" and "the app
+        // stored a placeholder".
+        const saveFromApi = Module.getSave();
+        results.batterySave = saveFromApi?.length ?? null;
         log(`getSave() bytes: ${results.batterySave}`);
+
+        const saveBytes = (() => {
+          try {
+            return Module.FS.readFile(Module.saveName);
+          } catch {
+            return null;
+          }
+        })();
+        results.saveFileBytes = saveBytes?.length ?? null;
+        const head = saveBytes ? [...saveBytes.slice(0, 4)] : null;
+        results.saveFileHead = head;
+        const nonZero = saveBytes ? saveBytes.reduce((count, byte) => count + (byte !== 0 ? 1 : 0), 0) : 0;
+        results.saveFileNonZero = nonZero;
+        log(`save file head ${JSON.stringify(head)} non-zero bytes: ${nonZero}`, nonZero > 0 ? 'ok' : 'bad');
+
+        // Cartridge save memory, read back by the ROM itself: it writes 0xA5 to
+        // SRAM[0] at boot and copies SRAM[0] into the green channel of (238,0)
+        // every frame. 0xA5 here means the emulated cartridge really holds the
+        // data; anything else means the write never reached the cart.
+        results.sramMarker = decodeWord(frame2, 238, 0) >> 5;
+        log(`cartridge SRAM read-back = 0x${results.sramMarker.toString(16)}`, results.sramMarker === 0xa5 ? 'ok' : 'bad');
+
+        // `getSave()` and the file on disk must agree; if they disagree, the app
+        // would persist stale bytes even though the cartridge holds real data.
+        results.saveFileMatchesApi =
+          Boolean(saveBytes) && Boolean(saveFromApi) && saveBytes.length === saveFromApi.length;
+        log(
+          `save file matches getSave(): ${results.saveFileMatchesApi}`,
+          results.saveFileMatchesApi ? 'ok' : 'bad',
+        );
 
         // Save state round trip.
         results.saveState = Module.saveState(9);

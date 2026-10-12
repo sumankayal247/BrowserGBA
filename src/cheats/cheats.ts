@@ -59,6 +59,9 @@ export const CHEAT_FORMATS: Record<CheatFormat, CheatFormatInfo> = {
   },
 };
 
+/** Ordered list of the same formats, for pickers and iteration. */
+export const CHEAT_FORMAT_LIST: CheatFormatInfo[] = Object.values(CHEAT_FORMATS);
+
 export const MAX_CHEAT_LINES = 200;
 export const MAX_LABEL_LENGTH = 64;
 export const MAX_CODE_LINE_LENGTH = 64;

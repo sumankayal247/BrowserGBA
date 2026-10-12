@@ -20,8 +20,11 @@
  *     save-state and rewind tests something real to compare.
  *  3. While the A button is held it writes `0x001F` (red) to pixel (239,159),
  *     so input handling is verifiable from a screenshot.
- *  4. It writes the frame counter to the start of SRAM each frame, so battery
- *     save extraction can be observed when the core backs the cart with SRAM.
+ *  4. It uses cartridge save memory once: 0xA5 is written to SRAM[0] at boot and
+ *     copied into the green channel of pixel (238,0) every frame. Saving once (not
+ *     every frame) is what lets the core settle and flush a .sav file, so this one
+ *     probe covers both "the cartridge accepted the write" and "the host can export
+ *     the save".
  *
  * Header fields follow GBATEK: the complement check at 0xBD is computed over
  * 0xA0..0xBC, and 0xBE..0xBF is reserved (zero).
@@ -238,8 +241,11 @@ function buildCode() {
   asm.loadConst(7, VRAM + (159 * 240 + 239) * 2); // r7 → pixel (239,159)
   asm.loadConst(8, SRAM); // r8  → cartridge SRAM
   asm.loadConst(6, IO + 0x130); // r6 → KEYINPUT (offset exceeds the 8-bit field)
+  asm.loadConst(12, 0xa5); // r12 → save-memory marker, written to SRAM[0] once
+  asm.mem('str', 12, 8, 0, { byte: true });
   asm.loadConst(2, 0x0403); // r2  → mode 3, BG2 enabled
   asm.mem('str', 2, 1, 0);
+  asm.loadConst(2, VRAM + 238 * 2); // r2 → probe pixel (238,0), reused after DISPCNT
 
   // Paint a deterministic ramp across all 240x160 pixels: pixel(i) = i.
   asm.loadConst(4, 0); //     r4 = colour counter
@@ -275,9 +281,19 @@ function buildCode() {
   asm.mov(11, 0x1f, { cond: 'EQ' });
   asm.mem('str', 11, 7, 0, { half: true });
 
-  // Persist the frame counter into SRAM (only meaningful if the core backs the
-  // cartridge with SRAM, but harmless otherwise).
-  asm.mem('str', 9, 8, 0, { byte: true });
+  // Cartridge save memory. 0xA5 was written once at boot, deliberately *not*
+  // every frame: the core flushes a save file only after the save data settles
+  // (a few frames without further writes — see GBASavedataClean in mGBA's
+  // savedata.c), so a ROM that wrote every frame would never produce a file and
+  // would make every battery-save test fail for the wrong reason. Reading does not
+  // dirty anything, so this read-back is free.
+  //
+  // The value is painted into the green channel of pixel (238,0) — the only way a
+  // test can observe cartridge memory from outside — which separates "the
+  // cartridge accepted the write" from "the host's save file is stale".
+  asm.mem('ldr', 12, 8, 0, { byte: true });
+  asm.movShifted(12, 12, 5); // green channel of a 15-bit colour word
+  asm.mem('str', 12, 2, 0, { half: true });
 
   // Spin until VBlank ends, then start the next frame.
   asm.label('waitVisible');
@@ -289,16 +305,21 @@ function buildCode() {
   return asm.finish();
 }
 
-function buildHeader(codeStartOffset) {
+function buildHeader(codeStartOffset, options = {}) {
   const header = Buffer.alloc(0xc0, 0);
   // 0x00: entry point — `B start`
   const delta = codeStartOffset - 8;
   header.writeUInt32LE((0xea000000 | ((delta >> 2) & 0xffffff)) >>> 0, 0);
   // 0x04..0x9F: the Nintendo logo is intentionally left zero. We do not ship or
   // reproduce it; mGBA's HLE BIOS does not require it.
-  header.write('BGTESTROM\0\0\0', 0xa0, 'ascii'); // 0x0A0 game title (12 bytes)
-  header.write('BGT1', 0xac, 'ascii'); //           0x0AC game code
-  header.write('01', 0xb0, 'ascii'); //             0x0B0 maker code
+  // Title and codes are parameters so tests can build a second, distinguishable
+  // cartridge without another copy of the emulator logic.
+  const title = (options.title ?? 'BGTESTROM').padEnd(12, '\0').slice(0, 12);
+  const gameCode = (options.gameCode ?? 'BGT1').padEnd(4, '\0').slice(0, 4);
+  const makerCode = (options.makerCode ?? '01').padEnd(2, '\0').slice(0, 2);
+  header.write(title, 0xa0, 'ascii'); //   0x0A0 game title (12 bytes)
+  header.write(gameCode, 0xac, 'ascii'); // 0x0AC game code
+  header.write(makerCode, 0xb0, 'ascii'); // 0x0B0 maker code
   header.writeUInt8(0x96, 0xb2); //                 0x0B2 fixed value
   header.writeUInt8(0x00, 0xb3); //                 0x0B3 main unit code
   header.writeUInt8(0x00, 0xb4); //                 0x0B4 device type
@@ -313,8 +334,8 @@ function buildHeader(codeStartOffset) {
   return header;
 }
 
-export function buildRom() {
-  const header = buildHeader(0xc0);
+export function buildRom(options = {}) {
+  const header = buildHeader(0xc0, options);
   const code = buildCode();
   const codeBytes = Buffer.alloc(code.length * 4);
   code.forEach((word, i) => codeBytes.writeUInt32LE(word, i * 4));

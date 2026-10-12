@@ -64,6 +64,15 @@ class FakeCore implements EmulatorCore {
     this.log.push(`loadRom:${options.romFileName}`);
     return true;
   }
+  readonly pressedButtons: string[] = [];
+
+  buttonPress(button: string): void {
+    this.pressedButtons.push(button);
+  }
+  buttonUnpress(button: string): void {
+    this.pressedButtons.push(`-${button}`);
+  }
+
   async unmount(): Promise<void> {
     this.unmountCount += 1;
     this.log.push('unmount');
@@ -98,9 +107,13 @@ class FakeCore implements EmulatorCore {
     this.settings.rewindActive = enabled;
     this.log.push(`rewind:${enabled}`);
   }
+  /** When set, any cheat file containing this text is refused, as mGBA does. */
+  refuseCheatContaining: string | null = null;
+
   async setCheatFile(romFileName: string, contents: string): Promise<boolean> {
-    this.files.set(`${this.paths.cheats}/${romFileName.replace(/\.gba$/, '.cheats')}`, contents);
     this.cheatReloadCount += 1;
+    if (this.refuseCheatContaining && contents.includes(this.refuseCheatContaining)) return false;
+    this.files.set(`${this.paths.cheats}/${romFileName.replace(/\.gba$/, '.cheats')}`, contents);
     return true;
   }
   async clearCheatFile(romFileName: string): Promise<void> {
@@ -228,6 +241,110 @@ describe('session startup', () => {
     });
     const { core } = await startSession({ game });
     expect(core.files.has(`${core.paths.cheats}/${game.id}.cheats`)).toBe(false);
+  });
+
+  it('keeps the game playable when the emulator refuses a cheat', async () => {
+    const game = await makeGame();
+    const good: CheatRecord = {
+      id: 'c-good',
+      gameId: game.id,
+      format: 'vba',
+      label: 'Money',
+      code: '02025BC4:0F42',
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const bad: CheatRecord = {
+      id: 'c-bad',
+      gameId: game.id,
+      format: 'gameShark',
+      label: 'Unparseable',
+      code: 'DEADBEEF CAFEBABE',
+      enabled: true,
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    await cheatsRepo.put(good);
+    await cheatsRepo.put(bad);
+
+    const rejected: string[] = [];
+    const core = new FakeCore();
+    // mGBA refuses the whole file when one code cannot be parsed, so the test
+    // makes the fake core behave the same way.
+    core.refuseCheatContaining = bad.code;
+    const session = await EmulatorSession.start({
+      core,
+      game,
+      romBytes: makeRom(),
+            hooks: { onCheatsRejected: (list) => rejected.push(...list.map((cheat) => cheat.id)) },
+    });
+
+    // The game must still be running: a bad code is never a reason to refuse play.
+    expect(session.getState()).toBe('running');
+    expect(core.loadedRom?.romFileName).toBe(`${game.id}.gba`);
+    expect(rejected).toEqual(['c-bad']);
+    expect(session.getRejectedCheats().map((cheat) => cheat.id)).toEqual(['c-bad']);
+
+    // The accepted code is what the core ends up with — the bad one is not in it.
+    const written = core.files.get(`${core.paths.cheats}/${game.id}.cheats`);
+    expect(written).toBe(serialiseCheatFile([good]));
+
+    // The rejected code is marked in storage, not silently deleted.
+    const stored = await cheatsRepo.listForGame(game.id);
+    const storedBad = stored.find((cheat) => cheat.id === 'c-bad');
+    const storedGood = stored.find((cheat) => cheat.id === 'c-good');
+    expect(storedBad?.lastRejectedAt).toBeGreaterThan(0);
+    expect(storedBad?.label).toBe('Unparseable');
+    expect(storedGood?.lastRejectedAt).toBeUndefined();
+  });
+
+  it('clears the rejection mark once the emulator accepts the code again', async () => {
+    const game = await makeGame();
+    const cheat: CheatRecord = {
+      id: 'c1',
+      gameId: game.id,
+      format: 'vba',
+      label: 'Money',
+      code: '02025BC4:0F42',
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+      lastRejectedAt: 5,
+      lastRejectedReason: 'refused earlier',
+    };
+    await cheatsRepo.put(cheat);
+
+    await startSession({ game });
+    const stored = (await cheatsRepo.listForGame(game.id))[0]!;
+    expect(stored.lastRejectedAt).toBeUndefined();
+  });
+
+  it('runs with no cheats at all when every code is refused', async () => {
+    const game = await makeGame();
+    const bad: CheatRecord = {
+      id: 'c-bad',
+      gameId: game.id,
+      format: 'gameShark',
+      label: 'Unparseable',
+      code: 'DEADBEEF CAFEBABE',
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await cheatsRepo.put(bad);
+
+    const core = new FakeCore();
+    core.refuseCheatContaining = bad.code;
+    const session = await EmulatorSession.start({
+      core,
+      game,
+      romBytes: makeRom(),
+          });
+
+    expect(session.getState()).toBe('running');
+    expect(core.files.has(`${core.paths.cheats}/${game.id}.cheats`)).toBe(false);
+    expect(session.getRejectedCheats()).toHaveLength(1);
   });
 
   it('reports a load failure instead of pretending to play', async () => {
@@ -625,7 +742,7 @@ describe('cheat isolation across sessions', () => {
     };
     // Foreign records are refused individually and reported, never applied.
     const result = await session.applyCheats([foreign]);
-    expect(result).toEqual({ applied: 0, ignored: 1 });
+    expect(result).toEqual({ applied: 0, ignored: 1, rejected: 0 });
     const file = core.files.get(`${core.paths.cheats}/${gameA.id}.cheats`) ?? '';
     expect(file).not.toContain('Should not apply');
   });

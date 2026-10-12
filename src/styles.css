@@ -1,0 +1,1425 @@
+/*
+ * BrowserGBA styles.
+ *
+ * Direction: a dark, restrained retro-handheld library. Pixel accents are kept
+ * to borders and small marks so they read as flavour rather than decoration, and
+ * text stays in a normal UI font for legibility. Nothing here imitates Nintendo
+ * trade dress.
+ *
+ * Layout rules that matter:
+ * - The player viewport is sized by JS to whole-number scales; CSS only provides
+ *   the frame, so pixels stay crisp.
+ * - Touch controls are laid out so the game remains visible between the D-pad
+ *   and the face buttons.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0b0e13;
+  --bg-raised: #121722;
+  --bg-sunken: #080a0f;
+  --surface: #151b28;
+  --surface-strong: #1c2434;
+  --border: #263043;
+  --border-strong: #37445c;
+
+  --text: #e7edf6;
+  --text-muted: #9aa7bd;
+  --text-faint: #6d7a91;
+
+  --accent: #7dd3a0;
+  --accent-strong: #4fd18b;
+  --accent-dim: #2f6b4d;
+  --warn: #f2b34a;
+  --danger: #ff7a75;
+  --info: #6cb8f6;
+
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 14px;
+
+  --focus-ring: 0 0 0 3px rgba(125, 211, 160, 0.55);
+
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Keep the game surface from being selected, dragged or bounced while playing. */
+body[data-playing="true"] {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0 0 0.4em;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: 1.5rem;
+}
+h2 {
+  font-size: 1.2rem;
+}
+h3 {
+  font-size: 1rem;
+}
+
+p {
+  margin: 0 0 0.85em;
+}
+
+a {
+  color: var(--info);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: #93cdfb;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+kbd {
+  display: inline-block;
+  padding: 0.1em 0.4em;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  color: var(--text);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  background: var(--accent);
+  color: #06210f;
+  border-radius: 0 0 var(--radius) 0;
+  font-weight: 600;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- app shell ---------------------------------------------------------- */
+
+.app-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.6rem clamp(0.75rem, 3vw, 1.5rem);
+  background: linear-gradient(180deg, var(--bg-raised), var(--bg));
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  display: block;
+  border-radius: 6px;
+  image-rendering: pixelated;
+}
+
+.brand-sub {
+  font-weight: 500;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+}
+
+.app-nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* Narrow phones: the header must not eat the height the game needs. Let the nav
+   scroll sideways rather than wrap onto a second row, and shrink it a little. */
+@media (max-width: 560px) {
+  .app-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    width: 100%;
+    margin-left: 0;
+    padding-bottom: 0.1rem;
+  }
+
+  .app-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-link {
+    white-space: nowrap;
+    font-size: 0.85rem;
+    padding: 0.35rem 0.6rem;
+  }
+
+  .app-header {
+    padding: 0.5rem 0.75rem 0.4rem;
+    gap: 0.4rem;
+  }
+}
+
+.nav-link {
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 550;
+  border: 1px solid transparent;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.nav-link[aria-current="page"] {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: rgba(125, 211, 160, 0.08);
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(0.9rem, 3vw, 1.75rem);
+}
+
+.app-footer {
+  padding: 1rem clamp(0.75rem, 3vw, 1.5rem) 2rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.view-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.view-header p {
+  margin: 0;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+/* --- surfaces ----------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: clamp(0.9rem, 2.4vw, 1.25rem);
+}
+
+.card + .card {
+  margin-top: 1rem;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-title h2,
+.card-title h3 {
+  margin: 0;
+}
+
+.panel-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.empty-state {
+  text-align: center;
+  padding: clamp(1.5rem, 6vw, 3.5rem) 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+}
+
+.empty-state h2 {
+  color: var(--text);
+}
+
+/* --- buttons ------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.9rem;
+  min-height: 40px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 550;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #232d40;
+  border-color: #44536f;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, var(--accent-strong), #37a873);
+  border-color: #2c8a5d;
+  color: #05230f;
+  font-weight: 650;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #63dc9d, #3fb37c);
+}
+
+.btn-danger {
+  border-color: #6d2f2c;
+  background: rgba(255, 122, 117, 0.12);
+  color: #ffb3b0;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 122, 117, 0.2);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.btn-sm {
+  min-height: 34px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.btn-icon {
+  min-width: 40px;
+  padding: 0.4rem;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* --- forms -------------------------------------------------------------- */
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 550;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="url"],
+select,
+textarea {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  min-height: 40px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+}
+
+textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.checkbox-row label {
+  margin: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.field {
+  margin-bottom: 0.85rem;
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  margin-top: 0.25rem;
+}
+
+.field-error {
+  font-size: 0.82rem;
+  color: var(--danger);
+  margin-top: 0.3rem;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.switch-row:last-child {
+  border-bottom: 0;
+}
+
+.switch-row .switch-text {
+  min-width: 0;
+}
+
+.switch-row .switch-text strong {
+  display: block;
+  font-weight: 550;
+  font-size: 0.93rem;
+}
+
+.switch-row .switch-text span {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+}
+
+/* --- library ------------------------------------------------------------ */
+
+.toolbar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.toolbar .search {
+  flex: 1 1 240px;
+  min-width: 190px;
+}
+
+.library-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.game-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  position: relative;
+}
+
+.game-card:hover {
+  border-color: var(--border-strong);
+}
+
+.library-list .game-card {
+  flex-direction: row;
+  align-items: center;
+}
+
+.game-art {
+  aspect-ratio: 3 / 2;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.library-list .game-art {
+  width: 96px;
+  flex: 0 0 96px;
+}
+
+.game-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.game-art-placeholder {
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  color: var(--accent-dim);
+  letter-spacing: 0.05em;
+}
+
+.game-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.game-title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.game-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.game-title a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.game-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+.game-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.tag {
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.game-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.favourite-toggle[aria-pressed="true"] {
+  color: var(--warn);
+  border-color: #6b531f;
+  background: rgba(242, 179, 74, 0.12);
+}
+
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  text-align: center;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.dropzone[data-dragover="true"] {
+  border-color: var(--accent);
+  background: rgba(125, 211, 160, 0.07);
+}
+
+/* --- badges & status ---------------------------------------------------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+.badge-ok {
+  color: #b9f5d3;
+  border-color: #2f6b4d;
+  background: rgba(79, 209, 139, 0.14);
+}
+
+.badge-warn {
+  color: #ffe0ab;
+  border-color: #6b531f;
+  background: rgba(242, 179, 74, 0.14);
+}
+
+.badge-danger {
+  color: #ffc3c0;
+  border-color: #6d2f2c;
+  background: rgba(255, 122, 117, 0.14);
+}
+
+.badge-info {
+  color: #cfe7fd;
+  border-color: #2c5271;
+  background: rgba(108, 184, 246, 0.14);
+}
+
+.notice {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  font-size: 0.88rem;
+  margin-bottom: 0.75rem;
+}
+
+.notice-warn {
+  border-color: #6b531f;
+  background: rgba(242, 179, 74, 0.1);
+}
+
+.notice-danger {
+  border-color: #6d2f2c;
+  background: rgba(255, 122, 117, 0.1);
+}
+
+.notice-info {
+  border-color: #2c5271;
+  background: rgba(108, 184, 246, 0.1);
+}
+
+.notice-ok {
+  border-color: #2f6b4d;
+  background: rgba(79, 209, 139, 0.1);
+}
+
+.notice-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice h3 {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+}
+
+.notice p:last-child {
+  margin-bottom: 0;
+}
+
+/* --- player ------------------------------------------------------------- */
+
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.player-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.player-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stage-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.screen-frame {
+  position: relative;
+  background: #000;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  transition: none;
+}
+
+.screen-frame canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+}
+
+.filter-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: repeat;
+}
+
+.player-hud {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.speed-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  font-variant-numeric: tabular-nums;
+}
+
+.speed-indicator[data-active="true"] {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+  background: rgba(125, 211, 160, 0.12);
+}
+
+.speed-indicator[data-mode="slow"] {
+  border-color: #2c5271;
+  color: var(--info);
+  background: rgba(108, 184, 246, 0.12);
+}
+
+.save-indicator[data-status="saved"] {
+  color: var(--accent);
+}
+
+.save-indicator[data-status="pending"] {
+  color: var(--warn);
+}
+
+.save-indicator[data-status="error"] {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.control-strip {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.hold-btn[data-active="true"] {
+  border-color: var(--accent);
+  background: rgba(125, 211, 160, 0.16);
+  color: var(--accent);
+}
+
+/* Touch controls --------------------------------------------------------- */
+
+.touch-controls {
+  display: none;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  /* The pad is 3 keys tall; the extra band at the bottom is the hint's row, so
+     the hint can never sit on top of a button (it did, and the key was unplayable). */
+  min-height: calc(3 * var(--touch-key) + 4.6rem);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  padding: 0.5rem;
+}
+
+.touch-controls[data-enabled="true"] {
+  display: block;
+}
+
+.touch-pad {
+  position: absolute;
+  left: clamp(0.6rem, 4vw, 1.5rem);
+  bottom: 2.1rem;
+  display: grid;
+  grid-template-columns: repeat(3, var(--touch-key));
+  grid-template-rows: repeat(3, var(--touch-key));
+  gap: 2px;
+}
+
+.touch-buttons {
+  position: absolute;
+  right: clamp(0.6rem, 4vw, 1.5rem);
+  bottom: 2.1rem;
+  display: grid;
+  grid-template-columns: repeat(2, var(--touch-key));
+  grid-template-rows: repeat(2, var(--touch-key));
+  gap: 6px;
+}
+
+.touch-shoulders {
+  position: absolute;
+  top: 0.5rem;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 clamp(0.6rem, 4vw, 1.5rem);
+}
+
+.touch-key {
+  width: var(--touch-key);
+  height: var(--touch-key);
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: var(--touch-opacity);
+  touch-action: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.touch-key[data-held="true"] {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #eafff3;
+}
+
+.touch-key-round {
+  border-radius: 50%;
+}
+
+.touch-key-wide {
+  width: auto;
+  min-width: calc(var(--touch-key) * 1.15);
+  padding: 0 0.5rem;
+  border-radius: 10px;
+}
+
+.touch-dpad-cell {
+  visibility: hidden;
+}
+
+.touch-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.55rem;
+  margin: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  color: var(--text-faint);
+}
+
+/* Orientation guidance: only a portrait touch device benefits from rotating. */
+.orientation-hint {
+  display: none;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  margin: 0;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .orientation-hint {
+    display: block;
+  }
+}
+
+/* Landscape phones: put the controls beside the screen so the game can use the
+   full height of the viewport. Scoped to coarse pointers so desktop windows that
+   happen to be short keep their normal stacked layout. */
+@media (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
+  /* Landscape play on a phone: while a game is running, the app chrome gives up its
+     height to the game. The player bar keeps the "back to library" exit path. */
+  body[data-playing] .app-header,
+  body[data-playing] .app-footer {
+    display: none;
+  }
+
+  body[data-playing] .app-main {
+    max-width: none;
+    padding: 0.4rem;
+  }
+
+  .stage-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 40%);
+    grid-template-rows: auto auto 1fr;
+    gap: 0.5rem 0.75rem;
+    align-items: start;
+  }
+
+  /* The game claims the left column for all three rows, so it gets the full height
+     of the viewport instead of queuing behind the controls. */
+  .player-fullscreen-host {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    align-self: start;
+    min-width: 0;
+  }
+
+  /* Scroll sideways instead of wrapping: a wrapped strip was 240px tall and left no
+     room for the game. */
+  .control-strip {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.4rem;
+  }
+
+  .player-hud {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  /* Natural height: clamping this squashed the pad into an 18px strip and let the
+     absolutely positioned keys spill over their container. */
+  .touch-controls[data-enabled="true"] {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: start;
+    margin: 0;
+  }
+
+  .touch-hint {
+    display: none;
+  }
+}
+
+/* Fullscreen ------------------------------------------------------------- */
+
+.player:fullscreen,
+.stage-wrap:fullscreen {
+  background: #000;
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.player:fullscreen .player-bar,
+.stage-wrap:fullscreen .player-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 0.5rem;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent);
+  z-index: 5;
+  opacity: 0.25;
+  transition: opacity 150ms ease;
+}
+
+.player:fullscreen .player-bar:hover,
+.player:fullscreen .player-bar:focus-within,
+.stage-wrap:fullscreen .player-bar:hover {
+  opacity: 1;
+}
+
+.player:fullscreen .touch-controls[data-enabled="true"],
+.stage-wrap:fullscreen .touch-controls[data-enabled="true"] {
+  position: absolute;
+  inset: auto 0 0 0;
+  background: transparent;
+  border: 0;
+  z-index: 4;
+}
+
+/* --- dialogs ------------------------------------------------------------ */
+
+dialog.dialog {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+  max-width: min(560px, 94vw);
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+}
+
+dialog.dialog::backdrop {
+  background: rgba(4, 6, 10, 0.7);
+  backdrop-filter: blur(2px);
+}
+
+.dialog-head {
+  padding: 1rem 1.15rem 0.5rem;
+}
+
+.dialog-body {
+  padding: 0 1.15rem 0.5rem;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding: 0.85rem 1.15rem 1.15rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+/* --- toasts ------------------------------------------------------------- */
+
+.toast-region {
+  position: fixed;
+  right: clamp(0.6rem, 2vw, 1.25rem);
+  bottom: clamp(0.6rem, 2vw, 1.25rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 60;
+  max-width: min(380px, 92vw);
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  font-size: 0.88rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.toast[data-kind="success"] {
+  border-color: #2f6b4d;
+}
+
+.toast[data-kind="error"] {
+  border-color: #6d2f2c;
+}
+
+.toast[data-kind="warning"] {
+  border-color: #6b531f;
+}
+
+.toast strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.toast-close {
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+
+/* --- tables & lists ----------------------------------------------------- */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.definition-list {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 0.3rem 1rem;
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+.definition-list dt {
+  color: var(--text-faint);
+}
+
+.definition-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.item-list li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.thumb {
+  width: 96px;
+  flex: 0 0 96px;
+  aspect-ratio: 3 / 2;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  object-fit: cover;
+  image-rendering: pixelated;
+  background: #000;
+}
+
+.meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+}
+
+.meter[data-level="warn"] > span {
+  background: linear-gradient(90deg, #d69a2f, var(--warn));
+}
+
+.meter[data-level="danger"] > span {
+  background: linear-gradient(90deg, #c4554f, var(--danger));
+}
+
+.progress-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.matrices {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.matrix-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem 1rem;
+  align-items: start;
+}
+
+.checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.checklist li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-size: 0.88rem;
+}
+
+.checklist .mark {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  width: 1.2rem;
+  flex: 0 0 1.2rem;
+}
+
+.checklist .mark[data-ok="true"] {
+  color: var(--accent);
+}
+
+.checklist .mark[data-ok="false"] {
+  color: var(--danger);
+}
+
+/* --- responsive --------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .app-nav {
+    margin-left: 0;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .view-header {
+    align-items: flex-start;
+  }
+
+  .definition-list {
+    grid-template-columns: 1fr;
+  }
+
+  .definition-list dt {
+    margin-top: 0.4rem;
+  }
+
+  .library-list .game-art {
+    width: 72px;
+    flex-basis: 72px;
+  }
+}
+
+/* Wide screens with a mouse: keep the touch pad out of the way. The pointer test
+   matters — a phone in landscape is wider than this, and hiding its on-screen
+   controls there would leave it unplayable. */
+@media (min-width: 900px) and (pointer: fine) {
+  .touch-controls[data-enabled="true"] {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  /* Touch devices get bigger hit targets everywhere. */
+  .btn {
+    min-height: 44px;
+  }
+}

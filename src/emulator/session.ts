@@ -13,9 +13,11 @@
  * - Stopping flushes pending saves, unmounts the core and detaches callbacks.
  */
 import type { GameRecord, BatterySaveRecord, CheatRecord, SaveStateRecord, ScreenshotRecord } from '@/storage/records';
-import { batterySavesRepo, saveStatesRepo, screenshotsRepo } from '@/storage/records';
+import { batterySavesRepo, cheatsRepo, saveStatesRepo, screenshotsRepo } from '@/storage/records';
 import { hashBytesHex } from '@/storage/hash';
+import { nextRecordId } from '@/storage/ids';
 import { serialiseCheatFile } from '@/cheats/cheats';
+import { GBA_BUTTONS, isGbaButton, type GbaButton } from '@/input/bindings';
 import type { EmulatorCore } from './core';
 
 export type SessionState = 'preparing' | 'running' | 'paused' | 'stopped';
@@ -67,6 +69,12 @@ export interface SessionHooks {
   onSpeedChange?: (current: number, isHold: boolean) => void;
   onSaveStatus?: (status: SaveStateFeedback) => void;
   onCheatsApplied?: (applied: number, ignored: number) => void;
+  /**
+   * Cheats the core refused. The session keeps running without them — a bad
+   * code must never make a game unplayable — and reports them so the UI can
+   * point the user at the code that needs fixing.
+   */
+  onCheatsRejected?: (rejected: CheatRecord[], applied: number) => void;
   onIncompatibleState?: (reason: string) => void;
 }
 
@@ -98,6 +106,7 @@ export class EmulatorSession {
   private settings: SessionSettings;
 
   private state: SessionState = 'preparing';
+  private rejectedCheats: CheatRecord[] = [];
   private speedOverride: number | null = null;
   private rewinding = false;
   private pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,15 +114,12 @@ export class EmulatorSession {
   private lastSavedHash: string | null = null;
   private disposed = false;
   private playStartedAt: number | null = null;
-  /** Makes record ids unique even when two writes land in the same millisecond. */
-  private sequence = 0;
   /** Timestamp of the last state we know is durable in IndexedDB. */
   lastPersistedSaveAt: number | null = null;
 
   /** `<gameId>:<kind>:<timestamp>:<sequence>` — unique and sortable. */
   private recordId(kind: string): string {
-    this.sequence += 1;
-    return `${this.game.id}:${kind}:${this.now()}:${this.sequence}`;
+    return nextRecordId(kind, this.game.id, this.now());
   }
 
   private constructor(options: CreateSessionOptions, settings: SessionSettings) {
@@ -135,7 +141,8 @@ export class EmulatorSession {
     session.lastSavedHash = storedSave?.hash ?? null;
     session.lastPersistedSaveAt = storedSave?.savedAt ?? null;
 
-    // Cheats first: the core reads the file during `loadRom`.
+    // Cheats first: the core reads the file during `loadRom`. A refusal here is
+    // reported and skipped — it must never stop the game from starting.
     await session.applyCheats(await session.loadCheats());
 
     const loaded = await session.core.loadRom({
@@ -291,6 +298,25 @@ export class EmulatorSession {
   }
 
   /** Clears fast-forward and rewind holds. Safe to call at any time. */
+  /**
+   * Presses or releases a game button.
+   *
+   * Input goes through the session (not straight to the core) so that it is
+   * refused once the session has stopped, it is recorded for teardown, and
+   * temporary speed holds are cleared when the user pauses.
+   */
+  sendInput(button: GbaButton, pressed: boolean): void {
+    if (this.state === 'stopped' || this.state === 'preparing') return;
+    if (!isGbaButton(button)) return;
+    if (pressed) this.core.buttonPress(button);
+    else this.core.buttonUnpress(button);
+  }
+
+  /** Releases every button; used on blur and teardown so keys cannot stick. */
+  releaseAllInputs(): void {
+    for (const button of GBA_BUTTONS) this.core.buttonUnpress(button);
+  }
+
   releaseSpeedOverrides(): void {
     this.endFastForward();
     if (this.rewinding) this.stopRewind();
@@ -350,7 +376,6 @@ export class EmulatorSession {
   // --- cheats --------------------------------------------------------------
 
   private async loadCheats(): Promise<CheatRecord[]> {
-    const { cheatsRepo } = await import('@/storage/records');
     return cheatsRepo.listForGame(this.game.id);
   }
 
@@ -361,8 +386,13 @@ export class EmulatorSession {
    * reported instead, so a caller bug cannot silently apply someone else's codes
    * to this ROM. When nothing is enabled the cheat file is removed entirely:
    * "no cheats" must mean no file, not a stale one.
+   *
+   * If the core refuses the set (one unparseable code poisons the whole file for
+   * GBA cheat engines), the session falls back to applying the codes one at a
+   * time and keeps the ones that work. Playing the game always wins over
+   * applying a cheat.
    */
-  async applyCheats(cheats: CheatRecord[]): Promise<{ applied: number; ignored: number }> {
+  async applyCheats(cheats: CheatRecord[]): Promise<{ applied: number; ignored: number; rejected: number }> {
     const own = cheats.filter((cheat) => cheat.enabled && cheat.gameId === this.game.id);
     const ignored = cheats.length - cheats.filter((cheat) => cheat.gameId === this.game.id).length;
 
@@ -376,15 +406,72 @@ export class EmulatorSession {
     if (contents.trim().length === 0) {
       await this.core.clearCheatFile(this.romFileName());
       this.hooks.onCheatsApplied?.(0, ignored);
-      return { applied: 0, ignored };
+      return { applied: 0, ignored, rejected: 0 };
     }
 
-    const ok = await this.core.setCheatFile(this.romFileName(), contents);
-    if (!ok) {
-      throw new SessionError('The emulator rejected the cheat file.', 'cheats-rejected');
+    if (await this.core.setCheatFile(this.romFileName(), contents)) {
+      this.hooks.onCheatsApplied?.(own.length, ignored);
+      await this.markCheatsAccepted(own);
+      return { applied: own.length, ignored, rejected: 0 };
     }
-    this.hooks.onCheatsApplied?.(own.length, ignored);
-    return { applied: own.length, ignored };
+
+    // The core refused the set; find out which codes it will take.
+    const { accepted, rejected } = await this.triageCheats(own);
+    if (accepted.length > 0) {
+      await this.core.setCheatFile(this.romFileName(), serialiseCheatFile(accepted));
+    } else {
+      await this.core.clearCheatFile(this.romFileName());
+    }
+
+    this.rejectedCheats = rejected;
+    await this.markCheatsRejected(rejected, accepted);
+    this.hooks.onCheatsApplied?.(accepted.length, ignored);
+    if (rejected.length > 0) {
+      this.hooks.onCheatsRejected?.(rejected, accepted.length);
+    }
+    return { applied: accepted.length, ignored, rejected: rejected.length };
+  }
+
+  /** Tests each cheat on its own, so one bad code cannot hide the good ones. */
+  private async triageCheats(cheats: CheatRecord[]): Promise<{ accepted: CheatRecord[]; rejected: CheatRecord[] }> {
+    const accepted: CheatRecord[] = [];
+    const rejected: CheatRecord[] = [];
+    for (const cheat of cheats) {
+      const single = serialiseCheatFile([cheat]);
+      const ok = await this.core.setCheatFile(this.romFileName(), single);
+      if (ok) accepted.push(cheat);
+      else rejected.push(cheat);
+    }
+    return { accepted, rejected };
+  }
+
+  private async markCheatsRejected(rejected: CheatRecord[], accepted: CheatRecord[]): Promise<void> {
+    const reason = 'The emulator could not parse this code, so it was skipped.';
+    for (const cheat of rejected) {
+      try {
+        await cheatsRepo.put({ ...cheat, lastRejectedAt: this.now(), lastRejectedReason: reason });
+      } catch {
+        /* reporting is best-effort; the game must still start */
+      }
+    }
+    for (const cheat of accepted) {
+      if (!cheat.lastRejectedAt) continue;
+      try {
+        const { lastRejectedAt: _at, lastRejectedReason: _reason, ...clean } = cheat;
+        await cheatsRepo.put(clean);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
+  private async markCheatsAccepted(cheats: CheatRecord[]): Promise<void> {
+    await this.markCheatsRejected([], cheats);
+  }
+
+  /** Cheats the core refused during startup, newest attempt only. */
+  getRejectedCheats(): CheatRecord[] {
+    return [...this.rejectedCheats];
   }
 
   async clearCheats(): Promise<void> {

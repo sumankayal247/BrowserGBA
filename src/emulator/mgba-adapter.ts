@@ -15,6 +15,7 @@
  *   remapping, gamepads and touch share one code path and typed text never
  *   reaches the running game.
  */
+import { GBA_BUTTONS } from '@/input/bindings';
 import {
   CORE_SCRIPT_URL,
   CoreUnavailableError,
@@ -318,6 +319,34 @@ export class MgbaCore implements EmulatorCore {
     if (settings.audioSampleRate) coreSettings.audioSampleRate = settings.audioSampleRate;
     if (settings.audioBufferSize) coreSettings.audioBufferSize = settings.audioBufferSize;
     if (Object.keys(coreSettings).length > 0) module.setCoreSettings(coreSettings);
+  }
+
+  buttonPress(button: string): void {
+    if (!this.knownButton(button)) return;
+    this.require().buttonPress(button);
+  }
+
+  buttonUnpress(button: string): void {
+    if (!this.knownButton(button)) return;
+    this.require().buttonUnpress(button);
+  }
+
+  /**
+   * Guards against passing anything but a real button name into the core.
+   *
+   * The core looks names up in its own table, so an unknown string is a no-op
+   * there — but validating here means a typo in our mapping surfaces in a unit
+   * test rather than as a silently dead key.
+   */
+  private knownButton(button: string): boolean {
+    return (GBA_BUTTONS as readonly string[]).includes(button);
+  }
+
+  /** Releases every button the core may still think is held. */
+  releaseAllButtons(): void {
+    const module = this.module;
+    if (!module) return;
+    for (const button of GBA_BUTTONS) module.buttonUnpress(button);
   }
 
   getSpeedMultiplier(): number {

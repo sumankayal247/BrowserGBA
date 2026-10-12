@@ -1,42 +1,30 @@
 /**
- * Persisted record shapes and per-store repositories.
+ * Record shapes and repositories.
  *
- * Everything is scoped by `gameId`, which is derived from the ROM content hash,
- * so a game's saves, states and cheats follow the ROM bytes rather than a
- * filename. That is what makes cross-game leakage impossible by construction.
+ * Repositories exist so callers never build IndexedDB requests by hand: every
+ * query the app needs has a name here, which keeps the schema knowledge in one
+ * place and makes it obvious what each store is for.
  */
-import {
-  STORE,
-  StorageError,
-  request,
-  transact,
-  type StoreName,
-} from './db';
-import type { GbaHeader } from '@/rom/header';
+import { STORE, StorageError, count, request, transact, type StoreName } from './db';
 
 export interface GameRecord {
-  /** Stable id derived from the ROM content hash. */
+  /** Content-hash-derived id. Stable across re-imports of identical ROMs. */
   id: string;
-  /** SHA-256 of the ROM bytes. */
   contentHash: string;
-  /** Title from the ROM header, or the filename when the header has none. */
+  /** Title taken from the ROM header. */
   title: string;
-  /** User override; shown instead of `title` when present. */
+  /** What the user renamed it to, if anything. */
   customTitle?: string;
-  /** Original filename, kept as metadata only. */
   fileName: string;
   size: number;
-  /** Header fields worth showing in the library and duplicates UI. */
   gameCode: string | null;
   makerCode: string | null;
   softwareVersion: number | null;
-  /** True when the ROM carries a Nintendo logo region (i.e. likely a retail dump). */
   hasNintendoLogo: boolean;
-  /** Validation warnings captured at import time, so the UI can still show them. */
+  /** Non-fatal problems found at import time, kept so the UI can show them. */
   warnings: string[];
   addedAt: number;
   lastPlayedAt: number | null;
-  /** Accumulated playtime in milliseconds; only incremented from real sessions. */
   playtimeMs: number;
   favourite: boolean;
   tags: string[];
@@ -45,7 +33,6 @@ export interface GameRecord {
 
 export interface RomRecord {
   gameId: string;
-  /** Raw ROM bytes. Stored separately from metadata so metadata writes stay cheap. */
   bytes: ArrayBuffer;
   contentType: string;
   storedAt: number;
@@ -62,33 +49,30 @@ export interface BatterySaveRecord {
   savedAt: number;
   /** SHA-256 of the save bytes, used to skip redundant writes. */
   hash: string;
+  /** Free-text note, e.g. "before the Elite Four". */
   note?: string;
 }
 
 export interface SaveStateRecord {
   id: string;
   gameId: string;
-  /** Named slot: 0 is the quick slot, the rest are user slots. */
+  /** Slot number: 0 is the quick slot, 1..9 are named slots. */
   slot: number;
   name: string;
-  note?: string;
   createdAt: number;
   bytes: ArrayBuffer;
   size: number;
   /** PNG thumbnail of the frame at capture time, when available. */
   thumbnail: Blob | null;
-  /** Core identity the state was captured with, for compatibility checks. */
+  /** Free-text note set by the user. */
+  note?: string;
+  /** Which emulator produced this state, so incompatible states are refused. */
   coreName: string;
   coreVersion: string;
-  /** ROM content hash at capture time; a mismatch means "do not load". */
+  /** ROM content hash at capture time — the state is only valid for that ROM. */
   romHash: string;
 }
 
-/**
- * Cheat formats the emulator core actually implements for GBA. Action Replay
- * (PAR v3) codes are covered by `gameShark`: mGBA auto-detects the encrypted
- * GameShark and PAR variants from the same `XXXXXXXX YYYYYYYY` line shape.
- */
 export type CheatFormat = 'gameShark' | 'codeBreaker' | 'vba';
 
 export interface CheatRecord {
@@ -96,10 +80,19 @@ export interface CheatRecord {
   gameId: string;
   format: CheatFormat;
   label: string;
+  /** Raw code text, one code per line. Never executed as JavaScript. */
   code: string;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
+  /**
+   * Set when the emulator refused this code, cleared once it accepts it.
+   *
+   * A code the core cannot parse is kept and marked (never silently deleted), so
+   * the UI can say which one did not load instead of leaving the user guessing.
+   */
+  lastRejectedAt?: number;
+  lastRejectedReason?: string;
 }
 
 export interface ScreenshotRecord {
@@ -117,80 +110,117 @@ export interface SettingRecord<T = unknown> {
   updatedAt: number;
 }
 
-export type GamePatch = Partial<Omit<GameRecord, 'id' | 'contentHash'>>;
+function stripUndefined<T extends object>(value: T): T {
+  // IndexedDB structured-clones objects; `undefined` properties are dropped by
+  // the clone anyway, but doing it explicitly keeps tests deterministic.
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
+}
 
 // --- games -----------------------------------------------------------------
 
 export const gamesRepo = {
   async all(): Promise<GameRecord[]> {
-    return transact(STORE.games, 'readonly', (tx) => request(tx.objectStore(STORE.games).getAll()));
+    return transact(STORE.games, 'readonly', async (tx) => {
+      const rows = await request<GameRecord[]>(tx.objectStore(STORE.games).getAll());
+      return rows.map((row) => ({ ...row, tags: row.tags ?? [], warnings: row.warnings ?? [] }));
+    });
   },
 
   async get(id: string): Promise<GameRecord | null> {
-    const record = await transact(STORE.games, 'readonly', (tx) =>
-      request<GameRecord | undefined>(tx.objectStore(STORE.games).get(id)),
-    );
-    return record ?? null;
+    return transact(STORE.games, 'readonly', async (tx) => {
+      const row = await request<GameRecord | undefined>(tx.objectStore(STORE.games).get(id));
+      return row ? { ...row, tags: row.tags ?? [], warnings: row.warnings ?? [] } : null;
+    });
   },
 
   async findByContentHash(contentHash: string): Promise<GameRecord | null> {
-    const record = await transact(STORE.games, 'readonly', (tx) =>
-      request<GameRecord | undefined>(
+    return transact(STORE.games, 'readonly', async (tx) => {
+      const row = await request<GameRecord | undefined>(
         tx.objectStore(STORE.games).index('byContentHash').get(contentHash),
-      ),
-    );
-    return record ?? null;
+      );
+      return row ?? null;
+    });
   },
 
   async put(game: GameRecord): Promise<void> {
-    await transact(STORE.games, 'readwrite', (tx) => request(tx.objectStore(STORE.games).put(game)));
+    await transact(STORE.games, 'readwrite', (tx) =>
+      request(tx.objectStore(STORE.games).put(stripUndefined(game))),
+    );
   },
 
-  async patch(id: string, patch: GamePatch): Promise<GameRecord> {
+  async patch(id: string, patch: Partial<Omit<GameRecord, 'id'>>): Promise<GameRecord> {
     return transact(STORE.games, 'readwrite', async (tx) => {
       const store = tx.objectStore(STORE.games);
       const existing = await request<GameRecord | undefined>(store.get(id));
-      if (!existing) throw new StorageError('not-found', `No game with id ${id}.`);
-      const updated: GameRecord = { ...existing, ...patch, id: existing.id };
+      if (!existing) throw new StorageError('not-found', `No game with id ${id}`);
+      const updated: GameRecord = { ...existing, ...stripUndefined(patch), id };
       await request(store.put(updated));
       return updated;
     });
   },
 
-  /** Removes the game record plus everything scoped to it, in one transaction. */
-  async removeCascade(id: string): Promise<{ romRemoved: boolean; saves: number; states: number; cheats: number }> {
-    const scoped: StoreName[] = [STORE.games, STORE.roms, STORE.batterySaves, STORE.saveStates, STORE.cheats, STORE.screenshots];
-    return transact(scoped, 'readwrite', async (tx) => {
-      const romStore = tx.objectStore(STORE.roms);
-      const romRemoved = (await request<RomRecord | undefined>(romStore.get(id))) !== undefined;
-      await request(romStore.delete(id));
+  /**
+   * Removes a game and everything belonging to it in one transaction.
+   *
+   * A single transaction matters: a partial delete would leave save data
+   * attached to nothing, which is worse than either outcome.
+   */
+  async removeCascade(
+    id: string,
+  ): Promise<{ romRemoved: boolean; saves: number; states: number; cheats: number }> {
+    const stores: StoreName[] = [
+      STORE.games,
+      STORE.roms,
+      STORE.batterySaves,
+      STORE.saveStates,
+      STORE.cheats,
+      STORE.screenshots,
+      STORE.covers,
+    ];
+    return transact(stores, 'readwrite', async (tx) => {
+      const romRemoved = (await request<IDBValidKey | undefined>(tx.objectStore(STORE.roms).getKey(id))) !== undefined;
       await request(tx.objectStore(STORE.games).delete(id));
+      await request(tx.objectStore(STORE.roms).delete(id));
 
-      const counts = { saves: 0, states: 0, cheats: 0 };
+      const counts: { saves: number; states: number; cheats: number } = { saves: 0, states: 0, cheats: 0 };
       for (const [storeName, key] of [
         [STORE.batterySaves, 'saves'],
         [STORE.saveStates, 'states'],
         [STORE.cheats, 'cheats'],
-        [STORE.screenshots, 'screenshots'],
       ] as const) {
         const store = tx.objectStore(storeName);
-        const keys = await request(store.index('byGame').getAllKeys(id));
-        await Promise.all(keys.map((k) => request(store.delete(k))));
-        if (key !== 'screenshots') counts[key] = keys.length;
+        const keys = await request<IDBValidKey[]>(store.index('byGame').getAllKeys(id));
+        await Promise.all(keys.map((recordKey) => request(store.delete(recordKey))));
+        counts[key] = keys.length;
       }
+
+      // Screenshots and covers go with the game, but they are not part of the
+      // summary the UI shows (they are not progress).
+      const shots = tx.objectStore(STORE.screenshots);
+      const shotKeys = await request<IDBValidKey[]>(shots.index('byGame').getAllKeys(id));
+      await Promise.all(shotKeys.map((recordKey) => request(shots.delete(recordKey))));
+      await request(tx.objectStore(STORE.covers).delete(id));
+
       return { romRemoved, ...counts };
     });
   },
 };
 
-// --- rom bytes -------------------------------------------------------------
+// --- ROM bytes --------------------------------------------------------------
 
 export const romsRepo = {
   async get(gameId: string): Promise<RomRecord | null> {
-    const record = await transact(STORE.roms, 'readonly', (tx) =>
-      request<RomRecord | undefined>(tx.objectStore(STORE.roms).get(gameId)),
-    );
-    return record ?? null;
+    return transact(STORE.roms, 'readonly', async (tx) => {
+      const row = await request<RomRecord | undefined>(tx.objectStore(STORE.roms).get(gameId));
+      return row ?? null;
+    });
+  },
+
+  async has(gameId: string): Promise<boolean> {
+    return transact(STORE.roms, 'readonly', async (tx) => {
+      const key = await request<IDBValidKey | undefined>(tx.objectStore(STORE.roms).getKey(gameId));
+      return key !== undefined;
+    });
   },
 
   async put(gameId: string, bytes: ArrayBuffer, contentType = 'application/octet-stream'): Promise<void> {
@@ -203,10 +233,10 @@ export const romsRepo = {
   },
 };
 
-// --- battery saves ---------------------------------------------------------
+// --- battery saves ----------------------------------------------------------
 
 export const batterySavesRepo = {
-  /** Newest first. */
+  /** All generations for a game, newest first. */
   async listForGame(gameId: string): Promise<BatterySaveRecord[]> {
     return transact(STORE.batterySaves, 'readonly', async (tx) => {
       const rows = await request<BatterySaveRecord[]>(
@@ -216,8 +246,9 @@ export const batterySavesRepo = {
     });
   },
 
+  /** Most recent battery save for a game, or null. */
   async latest(gameId: string): Promise<BatterySaveRecord | null> {
-    const rows = await this.listForGame(gameId);
+    const rows = await batterySavesRepo.listForGame(gameId);
     return rows[0] ?? null;
   },
 
@@ -233,19 +264,36 @@ export const batterySavesRepo = {
     );
   },
 
+  /** Number of stored generations for a game. */
+  countForGame(gameId: string): Promise<number> {
+    return transact(STORE.batterySaves, 'readonly', async (tx) => {
+      const keys = await request<IDBValidKey[]>(
+        tx.objectStore(STORE.batterySaves).index('byGame').getAllKeys(gameId),
+      );
+      return keys.length;
+    });
+  },
+
   /**
-   * Trims automatic backups, keeping the newest `keep` of a given kind.
-   * Manual saves and imports are never deleted automatically.
+   * Trims automatic saves, keeping the newest `keep`.
+   *
+   * Manual saves, imports and pre-overwrite backups are never pruned: they only
+   * exist because a person asked for them.
    */
-  async pruneAuto(gameId: string, keep = 3): Promise<number> {
-    const rows = (await this.listForGame(gameId)).filter((row) => row.kind === 'auto');
-    const excess = rows.slice(keep);
-    for (const row of excess) await this.remove(row.id);
-    return excess.length;
+  async pruneAuto(gameId: string, keep: number): Promise<number> {
+    if (keep < 0) return 0;
+    return transact(STORE.batterySaves, 'readwrite', async (tx) => {
+      const store = tx.objectStore(STORE.batterySaves);
+      const rows = await request<BatterySaveRecord[]>(store.index('byGame').getAll(gameId));
+      const autos = rows.filter((row) => row.kind === 'auto').sort((a, b) => b.savedAt - a.savedAt);
+      const excess = autos.slice(keep);
+      await Promise.all(excess.map((row) => request(store.delete(row.id))));
+      return excess.length;
+    });
   },
 };
 
-// --- save states -----------------------------------------------------------
+// --- save states ------------------------------------------------------------
 
 export const saveStatesRepo = {
   async listForGame(gameId: string): Promise<SaveStateRecord[]> {
@@ -254,6 +302,13 @@ export const saveStatesRepo = {
         tx.objectStore(STORE.saveStates).index('byGame').getAll(gameId),
       );
       return rows.sort((a, b) => b.createdAt - a.createdAt);
+    });
+  },
+
+  async get(id: string): Promise<SaveStateRecord | null> {
+    return transact(STORE.saveStates, 'readonly', async (tx) => {
+      const row = await request<SaveStateRecord | undefined>(tx.objectStore(STORE.saveStates).get(id));
+      return row ?? null;
     });
   },
 
@@ -269,7 +324,7 @@ export const saveStatesRepo = {
     );
   },
 
-  /** Quick-save style slots keep a single state per (game, slot). */
+  /** Occupies a numbered slot: any previous state in that slot is replaced. */
   async replaceSlot(record: SaveStateRecord): Promise<void> {
     await transact(STORE.saveStates, 'readwrite', async (tx) => {
       const store = tx.objectStore(STORE.saveStates);
@@ -282,18 +337,23 @@ export const saveStatesRepo = {
   },
 
   async countAll(): Promise<number> {
-    return transact(STORE.saveStates, 'readonly', (tx) => request(tx.objectStore(STORE.saveStates).count()));
+    return count(STORE.saveStates);
   },
 };
 
-// --- cheats ----------------------------------------------------------------
+// --- cheats -----------------------------------------------------------------
 
 export const cheatsRepo = {
+  /** Cheats for one game only, oldest first. */
   async listForGame(gameId: string): Promise<CheatRecord[]> {
     return transact(STORE.cheats, 'readonly', async (tx) => {
       const rows = await request<CheatRecord[]>(tx.objectStore(STORE.cheats).index('byGame').getAll(gameId));
       return rows.sort((a, b) => a.createdAt - b.createdAt);
     });
+  },
+
+  async listEnabled(gameId: string): Promise<CheatRecord[]> {
+    return (await cheatsRepo.listForGame(gameId)).filter((cheat) => cheat.enabled);
   },
 
   async put(record: CheatRecord): Promise<void> {
@@ -304,12 +364,19 @@ export const cheatsRepo = {
     await transact(STORE.cheats, 'readwrite', (tx) => request(tx.objectStore(STORE.cheats).delete(id)));
   },
 
+  /**
+   * Toggles one cheat.
+   *
+   * The gameId is checked rather than trusted: this is the method that decides
+   * whether a cheat applies to the session that is about to start, so it must
+   * refuse to touch another game's record.
+   */
   async setEnabled(gameId: string, id: string, enabled: boolean): Promise<void> {
     await transact(STORE.cheats, 'readwrite', async (tx) => {
       const store = tx.objectStore(STORE.cheats);
       const existing = await request<CheatRecord | undefined>(store.get(id));
       if (!existing || existing.gameId !== gameId) {
-        throw new StorageError('not-found', 'That cheat is not part of the selected game.');
+        throw new StorageError('not-found', `Cheat ${id} does not belong to game ${gameId}`);
       }
       await request(store.put({ ...existing, enabled, updatedAt: Date.now() }));
     });
@@ -319,13 +386,12 @@ export const cheatsRepo = {
     return transact(STORE.cheats, 'readwrite', async (tx) => {
       const store = tx.objectStore(STORE.cheats);
       const rows = await request<CheatRecord[]>(store.index('byGame').getAll(gameId));
-      await Promise.all(
-        rows.map((row) => request(store.put({ ...row, enabled, updatedAt: Date.now() }))),
-      );
+      await Promise.all(rows.map((row) => request(store.put({ ...row, enabled }))));
       return rows.length;
     });
   },
 
+  /** Used when a game is removed, or to clear a bad set. */
   async clearForGame(gameId: string): Promise<number> {
     return transact(STORE.cheats, 'readwrite', async (tx) => {
       const store = tx.objectStore(STORE.cheats);
@@ -336,7 +402,7 @@ export const cheatsRepo = {
   },
 };
 
-// --- screenshots -----------------------------------------------------------
+// --- screenshots ------------------------------------------------------------
 
 export const screenshotsRepo = {
   async listForGame(gameId: string): Promise<ScreenshotRecord[]> {
@@ -359,21 +425,26 @@ export const screenshotsRepo = {
       request(tx.objectStore(STORE.screenshots).delete(id)),
     );
   },
+
+  async countAll(): Promise<number> {
+    return count(STORE.screenshots);
+  },
 };
 
-// --- settings --------------------------------------------------------------
+// --- settings ---------------------------------------------------------------
 
 export const settingsRepo = {
   async get<T>(key: string, fallback: T): Promise<T> {
-    const record = await transact(STORE.settings, 'readonly', (tx) =>
-      request<SettingRecord<T> | undefined>(tx.objectStore(STORE.settings).get(key)),
-    );
-    return record ? record.value : fallback;
+    return transact(STORE.settings, 'readonly', async (tx) => {
+      const row = await request<SettingRecord<T> | undefined>(tx.objectStore(STORE.settings).get(key));
+      return row ? row.value : fallback;
+    });
   },
 
   async set<T>(key: string, value: T): Promise<void> {
+    const record: SettingRecord<T> = { key, value, updatedAt: Date.now() };
     await transact(STORE.settings, 'readwrite', (tx) =>
-      request(tx.objectStore(STORE.settings).put({ key, value, updatedAt: Date.now() })),
+      request(tx.objectStore(STORE.settings).put(record)),
     );
   },
 
@@ -387,15 +458,3 @@ export const settingsRepo = {
     await transact(STORE.settings, 'readwrite', (tx) => request(tx.objectStore(STORE.settings).clear()));
   },
 };
-
-export function headerFieldsFor(header: GbaHeader | null): Pick<
-  GameRecord,
-  'gameCode' | 'makerCode' | 'softwareVersion' | 'hasNintendoLogo'
-> {
-  return {
-    gameCode: header?.gameCode ?? null,
-    makerCode: header?.makerCode ?? null,
-    softwareVersion: header?.softwareVersion ?? null,
-    hasNintendoLogo: header?.hasNintendoLogo ?? false,
-  };
-}

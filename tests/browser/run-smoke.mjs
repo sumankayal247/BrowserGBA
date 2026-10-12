@@ -178,7 +178,23 @@ async function main() {
       ['save state written', Boolean(results.saveState)],
       ['save state loaded', Boolean(results.loadState)],
       ['battery save extracted', typeof results.batterySave === 'number' && results.batterySave > 0],
+      ['cartridge save memory holds what the game wrote', results.sramMarker === 0xa5],
+      [
+        'the exported battery save contains the cartridge data',
+        results.saveFileHead?.[0] === 0xa5,
+        `head ${JSON.stringify(results.saveFileHead)} (${results.saveFileNonZero} non-zero bytes)`,
+      ],
     ];
+
+    // Reported rather than asserted: with this homebrew fixture the core exports a
+    // 32 KiB all-zero save file even though the cartridge memory itself answers
+    // (see the read-back check). That is mGBA's save-type handling for a cart with
+    // no database entry, not app behaviour, and it is recorded as unverified in
+    // GAME_PLAN.md instead of being papered over with a passing check.
+    console.log(
+      `\n[test:browser] note: exported save file has ${results.saveFileNonZero} non-zero bytes ` +
+        `(head ${JSON.stringify(results.saveFileHead)}), getSave() reported ${results.batterySave} bytes`,
+    );
 
     console.log('\n[test:browser] checks:');
     for (const [label, pass] of checks) {

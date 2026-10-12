@@ -2,7 +2,7 @@
   "name": "browsergba",
   "version": "0.1.0",
   "private": true,
-  "description": "BrowserGBA — a local-first, GBA-only browser emulator and personal game library.",
+  "description": "BrowserGBA \u2014 a local-first, GBA-only browser emulator and personal game library.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "node tests/browser/run-smoke.mjs",
+    "test:e2e": "node tests/browser/run-app.mjs",
     "check": "npm run typecheck && npm run test",
     "rom:fixture": "node tools/make-test-rom.mjs"
   },

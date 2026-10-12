@@ -107,6 +107,10 @@ export interface EmulatorCore {
   reset(): void;
   isRunning(): boolean;
 
+  /** Presses a game button by name (GBA_BUTTONS). */
+  buttonPress(button: string): void;
+  buttonUnpress(button: string): void;
+
   applySettings(settings: CoreSettings): void;
   getSpeedMultiplier(): number;
   /** Turns the core's backwards-stepping rewind on or off. */

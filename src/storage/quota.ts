@@ -1,102 +1,100 @@
 /**
- * Storage quota reporting and eviction protection.
+ * Storage quota helpers.
  *
- * Browsers may evict an origin's data under pressure, and the user must be told
- * the truth about that. We do not promise durability we cannot deliver.
+ * ROM libraries are large, so the app warns *before* an import fails rather
+ * than after. The numbers come straight from the browser; when it refuses to
+ * report them we say so instead of inventing a figure.
  */
 import { StorageError } from './db';
 
 export interface StorageEstimate {
-  /** Best-effort bytes used by this origin, or null when the browser will not say. */
+  /** Bytes used by this origin, or null when the browser will not say. */
   usage: number | null;
-  /** Best-effort quota, or null when unknown. */
+  /** Bytes available to this origin, or null when unknown. */
   quota: number | null;
-  /** usage / quota as a ratio in 0..1, or null when unknown. */
+  /** usage / quota, 0..1, or null when unknown. */
   ratio: number | null;
-  /**
-   * Whether the browser is *likely* to keep this origin's data without eviction.
-   * False means "the browser may clear this at any time".
-   */
+  /** True when the browser has been asked to keep this data without eviction. */
   persisted: boolean;
-  /** True when the Storage API itself is unavailable. */
+  /** False when the Storage API is unavailable at all. */
   supported: boolean;
 }
 
 export async function estimateStorage(): Promise<StorageEstimate> {
   const manager = globalThis.navigator?.storage;
-  if (!manager || typeof manager.estimate !== 'function') {
+  if (!manager?.estimate) {
     return { usage: null, quota: null, ratio: null, persisted: false, supported: false };
   }
 
-  let usage: number | null = null;
-  let quota: number | null = null;
   try {
     const estimate = await manager.estimate();
-    usage = typeof estimate.usage === 'number' ? estimate.usage : null;
-    quota = typeof estimate.quota === 'number' ? estimate.quota : null;
+    const usage = typeof estimate.usage === 'number' ? estimate.usage : null;
+    const quota = typeof estimate.quota === 'number' && estimate.quota > 0 ? estimate.quota : null;
+    const persisted = manager.persisted ? await manager.persisted() : false;
+    return {
+      usage,
+      quota,
+      ratio: usage !== null && quota !== null ? Math.min(usage / quota, 1) : null,
+      persisted,
+      supported: true,
+    };
   } catch {
-    // Some browsers throw when the quota is unavailable; treat as unknown.
+    return { usage: null, quota: null, ratio: null, persisted: false, supported: false };
   }
-
-  let persisted = false;
-  try {
-    persisted = typeof manager.persisted === 'function' ? await manager.persisted() : false;
-  } catch {
-    persisted = false;
-  }
-
-  return {
-    usage,
-    quota,
-    ratio: usage !== null && quota ? Math.min(usage / quota, 1) : null,
-    persisted,
-    supported: true,
-  };
 }
 
 /**
- * Asks the browser to exempt this origin from automatic eviction.
+ * Asks the browser to keep this origin's data.
  *
- * Requires a user gesture in most browsers, so it is only ever called from an
- * explicit button press, never on load.
+ * Chrome grants this silently or after engagement; Firefox may prompt. Either
+ * answer is fine — the app never depends on it, it only reports it.
  */
 export async function requestPersistentStorage(): Promise<boolean> {
   const manager = globalThis.navigator?.storage;
-  if (!manager || typeof manager.persist !== 'function') {
-    throw new StorageError(
-      'not-supported',
-      'This browser has no API for requesting persistent storage.',
-    );
-  }
+  if (!manager?.persist) return false;
   try {
+    if (manager.persisted && (await manager.persisted())) return true;
     return await manager.persist();
-  } catch (error) {
-    throw new StorageError('unavailable', 'The browser rejected the persistence request.', error);
+  } catch {
+    return false;
   }
 }
 
-const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+/**
+ * Turns "the last write failed" into advice.
+ *
+ * Called when a write throws, so the user is told which of their games is
+ * taking the space rather than a generic error.
+ */
+export function quotaAdvice(error: unknown): string | null {
+  if (error instanceof StorageError && error.code === 'quota-exceeded') {
+    return 'Browser storage is full. Remove a game you no longer need, or export a backup and free space, then try again.';
+  }
+  return null;
+}
 
-/** Formats a byte count for humans; `null` becomes an explicit unknown. */
-export function formatBytes(bytes: number | null | undefined, unknownLabel = 'unknown'): string {
-  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return unknownLabel;
+export function formatBytes(bytes: number | null, unknownLabel = 'unknown'): string {
+  if (bytes === null || !Number.isFinite(bytes)) return unknownLabel;
   if (bytes < 1024) return `${bytes} B`;
-  let value = bytes;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
   let unit = 0;
-  while (value >= 1024 && unit < UNITS.length - 1) {
+  while (value >= 1024 && unit < units.length - 1) {
     value /= 1024;
-    unit++;
+    unit += 1;
   }
-  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${UNITS[unit]}`;
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
-/** Formats a duration in milliseconds as a compact playtime string. */
-export function formatDuration(ms: number | null | undefined): string {
-  if (!ms || ms <= 0) return '—';
-  const totalMinutes = Math.floor(ms / 60000);
-  if (totalMinutes < 1) return 'under a minute';
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours < 1) return `${totalMinutes} min`;
-  return minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+export function formatDuration(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms) || ms <= 0) return '—';
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  if (hours < 24) return remainMinutes === 0 ? `${hours} h` : `${hours} h ${remainMinutes} min`;
+  const days = Math.floor(hours / 24);
+  return `${days} d ${hours % 24} h`;
 }
