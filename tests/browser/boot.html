@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>BrowserGBA — core boot probe</title>
+    <style>
+      body { background: #0e1116; color: #e6edf3; font: 14px/1.4 ui-monospace, monospace; margin: 0; padding: 12px; }
+      canvas { image-rendering: pixelated; width: 480px; height: 320px; background: #000; border: 1px solid #30363d; }
+      #log { white-space: pre-wrap; margin-top: 8px; }
+      .ok { color: #8bf7bd; }
+      .bad { color: #ff7b72; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Standalone probe page used by tests/browser/run-smoke.mjs.
+
+      It is deliberately independent of the application's modules: it proves that
+      the vendored emulator core boots, runs a ROM deterministically, renders to a
+      canvas, responds to input, and that battery-save extraction works — before
+      any UI code is layered on top.
+    -->
+    <h1 style="font-size: 15px">mGBA core probe</h1>
+    <canvas id="screen" width="240" height="160"></canvas>
+    <div id="log">starting…</div>
+    <script type="module">
+      const log = (message, cls = '') => {
+        const el = document.getElementById('log');
+        el.innerHTML += `\n<span class="${cls}">${message}</span>`;
+        console.log('[probe]', message);
+      };
+
+      const results = {};
+      window.__probe = { ready: false, results };
+
+      try {
+        results.crossOriginIsolated = globalThis.crossOriginIsolated;
+        results.hasSharedArrayBuffer = typeof SharedArrayBuffer === 'function';
+        log(`crossOriginIsolated=${results.crossOriginIsolated} SAB=${results.hasSharedArrayBuffer}`);
+
+        const canvas = document.getElementById('screen');
+        const module = await import('/mgba/mgba.js');
+        const mGBA = module.default ?? module;
+        log('importing core…');
+
+        const Module = await mGBA({ canvas });
+        results.coreVersion = `${Module.version.projectName} ${Module.version.projectVersion}`;
+        log(`core: ${results.coreVersion}`, 'ok');
+
+        Module.setLogger((entry) => {
+          if (entry.level === 'ERROR' || entry.level === 'FATAL') {
+            results.lastCoreError = `${entry.level} ${entry.category}: ${entry.message}`;
+          }
+        });
+
+        await Module.FSInit();
+        log('filesystem initialised');
+
+        // Load the generated fixture ROM through the same upload path the app uses.
+        const bytes = new Uint8Array(await (await fetch('/fixtures/test-rom.gba')).arrayBuffer());
+        results.romBytes = bytes.length;
+        const file = new File([bytes], 'BGTESTROM.gba', { type: 'application/octet-stream' });
+        await new Promise((resolve) => Module.uploadRom(file, resolve));
+
+        const paths = Module.filePaths();
+        log(`rom written to ${paths.gamePath}`);
+        results.uploaded = Module.listRoms();
+
+        const loaded = Module.loadGame(`${paths.gamePath}/BGTESTROM.gba`);
+        results.loaded = loaded;
+        log(`loadGame → ${loaded}`, loaded ? 'ok' : 'bad');
+        if (!loaded) throw new Error('core refused to load the fixture ROM');
+        results.saveName = Module.saveName;
+        results.autoSaveStateName = Module.autoSaveStateName;
+
+        Module.setVolume(0); // keep CI quiet
+        Module.resumeGame();
+
+        // Let the core run, then read the framebuffer back through the canvas.
+        /**
+         * Reads the emulator's framebuffer by asking the core to render a PNG.
+         *
+         * Reading `canvas` directly does not work: the core renders through WebGL
+         * without `preserveDrawingBuffer`, so the drawing buffer is undefined once
+         * the frame has been composited. The core's own screenshot writer reads
+         * the framebuffer during frame capture, which is exactly what the app's
+         * screenshot feature uses, so this doubles as a test of that path.
+         */
+        const captureFrame = async () => {
+          const name = `probe-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+          const wrote = Module.screenshot(name);
+          if (!wrote) throw new Error('core refused to write a screenshot');
+          const bytes = Module.FS.readFile(`${paths.screenshotsPath}/${name}`);
+          const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+          const scratch = document.createElement('canvas');
+          scratch.width = bitmap.width;
+          scratch.height = bitmap.height;
+          const ctx = scratch.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(bitmap, 0, 0);
+          const data = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+          bitmap.close();
+          return {
+            width: scratch.width,
+            height: scratch.height,
+            data,
+            pixel: (x, y) => {
+              const i = (y * bitmap.width + x) * 4;
+              return [data[i], data[i + 1], data[i + 2]];
+            },
+          };
+        };
+
+        await new Promise((r) => setTimeout(r, 1200));
+        const frame1 = await captureFrame();
+        results.frameSize = [frame1.width, frame1.height];
+        log(`screenshot size: ${frame1.width}x${frame1.height}`, frame1.width === 240 ? 'ok' : 'bad');
+
+        const nonBlank = frame1.data.some((v, i) => i % 4 !== 3 && v !== 0);
+        results.nonBlank = nonBlank;
+        log(`frame 1 non-blank: ${nonBlank}`, nonBlank ? 'ok' : 'bad');
+
+        /**
+         * Decodes the framebuffer to 15-bit GBA colour words.
+         *
+         * The fixture paints `pixel(i) == i & 0xFFFF`, but bitmap modes use bit 15
+         * of each pixel as the OBJ-window flag rather than colour, so the rendered
+         * value is `i & 0x7FFF`. That masking is asserted below as a documented
+         * property of the core rather than silently tolerated.
+         */
+        const decodeWord = (frame, x, y) => {
+          const i = (y * 240 + x) * 4;
+          return ((frame.data[i] >> 3) | ((frame.data[i + 1] >> 3) << 5) | ((frame.data[i + 2] >> 3) << 10)) & 0x7fff;
+        };
+
+        const verifyRamp = (frame, skip) => {
+          const bad = [];
+          for (let y = 0; y < 160 && bad.length < 6; y++) {
+            for (let x = 0; x < 240 && bad.length < 6; x++) {
+              if (skip(x, y)) continue;
+              const expected = (y * 240 + x) & 0x7fff;
+              const got = decodeWord(frame, x, y);
+              if (got !== expected) bad.push({ x, y, expected, got });
+            }
+          }
+          return bad;
+        };
+
+        // Pixel (0,0) animates and pixel (239,159) is the input marker, so both
+        // are excluded from the static ramp check.
+        const rampSkip = (x, y) => (x === 0 && y === 0) || (x === 239 && y === 159);
+        const rampBad = verifyRamp(frame1, rampSkip);
+        results.rampMismatches = rampBad;
+        results.rampOk = rampBad.length === 0;
+        log(
+          `full-framebuffer ramp check: ${rampBad.length === 0 ? 'exact' : JSON.stringify(rampBad)}`,
+          rampBad.length === 0 ? 'ok' : 'bad',
+        );
+
+        // The fixture writes a 5-bit frame counter to pixel (0,0) (blue channel).
+        results.pixel00Frame1 = frame1.pixel(0, 0);
+        results.counterFrame1 = decodeWord(frame1, 0, 0) >> 10;
+        log(`pixel(0,0) counter = ${results.counterFrame1}`);
+
+        // Input: hold A, the fixture paints pixel (239,159) red (0x001F).
+        results.markerBefore = decodeWord(frame1, 239, 159);
+        Module.buttonPress('A');
+        await new Promise((r) => setTimeout(r, 700));
+        const withA = await captureFrame();
+        results.markerWithA = decodeWord(withA, 239, 159);
+        Module.buttonUnpress('A');
+        log(
+          `pixel(239,159) with A held = 0x${results.markerWithA.toString(16)}`,
+          results.markerWithA === 0x1f ? 'ok' : 'bad',
+        );
+
+        await new Promise((r) => setTimeout(r, 700));
+        const withoutA = await captureFrame();
+        results.markerWithoutA = decodeWord(withoutA, 239, 159);
+        log(
+          `pixel(239,159) released = 0x${results.markerWithoutA.toString(16)}`,
+          results.markerWithoutA === 0 ? 'ok' : 'bad',
+        );
+
+        // Determinism: the animated pixel must advance between captures.
+        const frame2 = await captureFrame();
+        results.counterFrame2 = decodeWord(frame2, 0, 0) >> 10;
+        results.frameAdvanced = results.counterFrame2 !== results.counterFrame1;
+        log(
+          `animated counter advanced ${results.counterFrame1} → ${results.counterFrame2}`,
+          results.frameAdvanced ? 'ok' : 'bad',
+        );
+
+        // The rest of the screen must still match the ramp while the game runs.
+        const lateBad = verifyRamp(frame2, rampSkip);
+        results.rampStillOk = lateBad.length === 0;
+        log(`ramp still exact after input test: ${lateBad.length === 0}`, lateBad.length === 0 ? 'ok' : 'bad');
+
+        // Battery save extraction (only meaningful if the cart is backed by SRAM).
+        results.batterySave = Module.getSave()?.length ?? null;
+        log(`getSave() bytes: ${results.batterySave}`);
+
+        // Save state round trip.
+        results.saveState = Module.saveState(9);
+        log(`saveState(9) → ${results.saveState}`);
+        results.loadState = Module.loadState(9);
+        log(`loadState(9) → ${results.loadState}`);
+
+        // Rewind support.
+        Module.toggleRewind(true);
+        await new Promise((r) => setTimeout(r, 400));
+        Module.toggleRewind(false);
+        results.rewindToggle = true;
+
+        results.coreError = null;
+        results.ok = true;
+        log('PROBE COMPLETE', 'ok');
+      } catch (error) {
+        results.coreError = String(error?.stack ?? error);
+        results.ok = false;
+        log(`PROBE FAILED: ${results.coreError}`, 'bad');
+      } finally {
+        window.__probe.ready = true;
+      }
+    </script>
+  </body>
+</html>

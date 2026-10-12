@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>BrowserGBA — Game Boy Advance in your browser</title>
+    <meta
+      name="description"
+      content="A local-first Game Boy Advance emulator and personal game library. Import your own ROMs; nothing is uploaded."
+    />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0e1116" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <!--
+      Cross-origin isolation (COOP/COEP) must be sent by the server for the
+      threaded emulator core to get SharedArrayBuffer. See docs/DEPLOYMENT.md.
+    -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+    <div id="app" class="app-root"></div>
+    <noscript>
+      <p style="padding: 2rem; font-family: system-ui">
+        BrowserGBA needs JavaScript and WebAssembly to run the emulator.
+      </p>
+    </noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
