@@ -360,9 +360,9 @@ Moderation covers spam, abuse and what the catalog itself stores — never the l
   app-level browser suite across three origins (headers, none, cross-origin frame).
 - Publish this repository to GitHub Pages (`https://sumankayal247.github.io/BrowserGBA/`) from
   `.github/workflows/deploy-pages.yml` on every push to `arena`/`main`, gated on `npm run
-  check` so a red build never reaches the site. — IMPLEMENTED. One manual, per-repository step
-  remains outside the code: set **Settings → Pages → Source: GitHub Actions**. Until that is
-  done the workflow's deploy step fails and the URL is empty.
+  check` so a red build never reaches the site. — IMPLEMENTED. The workflow enables Pages
+  itself on its first run, so no manual repository setting is needed; the setting remains the
+  documented fallback if the token is not allowed to enable it.
 - The deployed site has everything except the database-backed catalog, which is Phase 7 and
   exists nowhere yet. The README states this next to the link so the limitation is not
   discovered by surprise.

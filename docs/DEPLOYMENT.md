@@ -132,12 +132,13 @@ tests) before `npm run build`, so a red build never reaches the published site, 
 uploads `dist/` with `actions/upload-pages-artifact@v4` for
 `actions/deploy-pages@v4`.
 
-**One manual step per repository**, because the API does not expose it to
-deploy tokens: set **Settings → Pages → Build and deployment → Source:
-GitHub Actions**. Without it the workflow's deploy job fails with a Pages-related
-error and the site URL stays empty. After that, the site lives at
-`https://<user>.github.io/<repo>/` — for this repository,
-<https://sumankayal247.github.io/BrowserGBA/>.
+The workflow asks `actions/configure-pages` to **enable Pages by itself**
+(`enablement: true`), so the first run turns Pages on with "GitHub Actions" as its
+source and publishes the site; no repository setting has to be changed by hand. If
+that ever fails — the token lost `pages: write`, or Pages was disabled on purpose —
+the fallback is the manual setting: **Settings → Pages → Build and deployment →
+Source: GitHub Actions**. The site then lives at `https://<user>.github.io/<repo>/`
+— for this repository, <https://sumankayal247.github.io/BrowserGBA/>.
 
 Because Pages cannot send response headers, the deployed site is the case described
 above: the first visit registers the worker and everything except playback works,
