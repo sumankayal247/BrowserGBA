@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>BrowserGBA — non-isolated embedding probe</title>
+    <style>
+      body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #0e1116; color: #e6edf3; }
+      header { padding: 6px 10px; }
+      iframe { width: 100%; height: calc(100vh - 40px); border: 0; background: #0e1116; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Used by tests/browser/run-app.mjs.
+
+      An ordinary third-party embedding: this page is served WITHOUT
+      COOP/COEP, which is how most sites are delivered, so the browser withholds
+      cross-origin isolation from everything inside it — including the app in the
+      iframe. BrowserGBA must detect that, explain it, and offer to open in its
+      own tab rather than failing mysteriously. This page is how the test proves
+      it.
+
+      The suite points the frame at the app's own origin (a different origin from
+      this page) once the probe is loaded, so the `src` here is only a placeholder
+      that keeps the document valid on its own.
+    -->
+    <header>Non-isolated embedding probe — no COOP/COEP is sent for this page.</header>
+    <iframe src="about:blank" title="BrowserGBA inside an iframe" allow="gamepad; fullscreen"></iframe>
+  </body>
+</html>
