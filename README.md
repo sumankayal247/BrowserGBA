@@ -24,9 +24,11 @@ metadata service) is unimplemented everywhere, not just on Pages. What you get o
 that URL is the whole local app — import a ROM, play, save, export, edit your library.
 
 The site is published by `.github/workflows/deploy-pages.yml` on every push to
-`arena` or `main`; the workflow enables Pages itself on its first run, so there is
-nothing to configure. If that URL is empty, the workflow run will say why, and the
-fallback is **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+`arena` or `main`. Publishing needs Pages turned on once for the repository
+(**Settings → Pages → Build and deployment → Source: GitHub Actions**): creating a
+Pages site is a repository-admin action, and a workflow token is not allowed to do it.
+Until that setting exists the deploy run stops at its `configure-pages` step with a
+permissions error, after the install, tests and build have already passed.
 
 One caveat that only applies to hosting like this: GitHub Pages cannot send response
 headers, so the first visit is not cross-origin isolated and the emulator refuses to

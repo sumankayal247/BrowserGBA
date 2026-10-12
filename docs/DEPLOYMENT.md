@@ -132,13 +132,22 @@ tests) before `npm run build`, so a red build never reaches the published site, 
 uploads `dist/` with `actions/upload-pages-artifact@v4` for
 `actions/deploy-pages@v4`.
 
-The workflow asks `actions/configure-pages` to **enable Pages by itself**
-(`enablement: true`), so the first run turns Pages on with "GitHub Actions" as its
-source and publishes the site; no repository setting has to be changed by hand. If
-that ever fails — the token lost `pages: write`, or Pages was disabled on purpose —
-the fallback is the manual setting: **Settings → Pages → Build and deployment →
-Source: GitHub Actions**. The site then lives at `https://<user>.github.io/<repo>/`
-— for this repository, <https://sumankayal247.github.io/BrowserGBA/>.
+The workflow asks `actions/configure-pages` to enable Pages by itself
+(`enablement: true`). **In this repository that request is refused**: creating a Pages
+site through the API needs repository-admin rights, and a workflow's `GITHUB_TOKEN`
+does not have them, so the run stops at `actions/configure-pages@v5` with a
+permissions error. Everything before it — `npm ci`, `npm run check` (type-check plus
+the full unit suite) and `npm run build` — passes in CI, so the only missing piece is
+the one-time setting, which a repository admin has to make:
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Re-run the workflow (Actions → Deploy to GitHub Pages → Re-run jobs), or push
+   anything to `arena`/`main`.
+
+The site then lives at `https://<user>.github.io/<repo>/` — for this repository,
+<https://sumankayal247.github.io/BrowserGBA/>. `enablement: true` stays in the
+workflow because it does work in repositories whose token is allowed to create the
+Pages site, which makes the setting step unnecessary there.
 
 Because Pages cannot send response headers, the deployed site is the case described
 above: the first visit registers the worker and everything except playback works,
