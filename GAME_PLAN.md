@@ -10,14 +10,14 @@
 
 ## 1. Product vision
 
-Create a personal retro gaming hub that runs GBA games in a modern browser. Users can import their own legally obtained `.gba` ROM files, keep a tidy library, launch any game, save and restore progress, configure emulator behavior, and use the app on desktop or mobile.
+Create a personal retro gaming hub that runs GBA games in a modern browser. Users can import their own legally obtained `.gba` ROM files, keep a tidy local library, launch any game, save and restore progress, configure emulator behavior, and use the app on desktop or mobile. An optional online community catalog can store game metadata and moderated external resource links; it must never host ROM binaries and must not be required for local play.
 
 The experience should feel like a purpose-built retro handheld library rather than a bare emulator demo.
 
 ### Core principles
 
 1. **GBA-first:** Every initial-release decision should prioritize GBA compatibility and usability.
-2. **Local-first and privacy-first:** ROMs, save data, states, cheat configurations, and library metadata stay on the user's device by default.
+2. **Local-first and privacy-first:** ROMs, battery saves, save states, cheat configurations, and personal library metadata stay on the user's device by default. The separate online catalog stores only approved metadata and external links.
 3. **No ROM distribution:** Never bundle, host, scrape, or provide copyrighted commercial ROMs. Users import their own files. Homebrew/test ROMs may be used when their license permits it.
 4. **Never lose progress silently:** Show save status, handle storage failures, and offer exportable backups.
 5. **Mobile and desktop are first-class:** Responsive layout, touch controls, keyboard controls, and gamepad support where practical.
@@ -219,7 +219,21 @@ Requirements:
 - Do not store ROMs in localStorage.
 - Do not silently upload ROMs, saves, screenshots, or usage data.
 
-### B. Backup and restore
+### B. Save-file portability
+
+Browser storage is the default location for imported ROMs and game progress, but users must be able to move their progress outside the browser.
+
+- Store imported ROM bytes in IndexedDB where supported and within the user's available quota. Explain that browser storage can be cleared or evicted and must not be treated as the only backup.
+- Persist battery saves and save states locally, associated with the correct ROM identity and relevant core/version metadata.
+- Allow users to download/export a game's normal battery-save file (commonly `.sav`) to their device and later select/import that file to restore progress.
+- Allow save states to be exported and imported when the emulator core provides a safe, portable format. Clearly distinguish save states from normal battery-save files; do not promise cross-version/core compatibility unless verified.
+- Support backing up and restoring per-game metadata, cheats, settings, battery saves, and supported save states. ROM bytes are excluded from cloud backups by default; if a local backup package includes a ROM, make that inclusion explicit and user-initiated.
+- Validate imported files, check ROM association where possible, show a preview, and confirm before replacing existing progress.
+- Back up the current save before overwriting it where feasible; report import/export failures clearly.
+- Use predictable filenames based on a sanitized game title and file type, avoiding secrets or unsafe path characters.
+- Never silently overwrite a newer save, and never claim an export/import succeeded until the browser operation completes.
+
+### C. Backup and restore
 
 - Export a single game's package containing its metadata, battery save, save states, and cheat configuration when feasible.
 - Also support individual battery-save and cheat-list export/import.
@@ -228,7 +242,7 @@ Requirements:
 - Provide a way to back up all library metadata and saves without requiring the user to upload ROM files.
 - Make clear that restoring a backup does not necessarily include the ROM itself.
 
-### C. Offline/PWA
+### D. Offline/PWA
 
 - Make the app installable as a Progressive Web App where supported.
 - Cache the application shell and required licensed emulator assets for offline launch.
@@ -237,7 +251,7 @@ Requirements:
 - Provide update handling that does not unexpectedly interrupt an active session or erase local data.
 - Document browser-specific limitations.
 
-### D. Optional cross-device sync
+### E. Optional cross-device sync
 
 Design for optional sync, but do not make an account/server a prerequisite for local play.
 
@@ -249,6 +263,83 @@ Design for optional sync, but do not make an account/server a prerequisite for l
 - Detect conflicting save versions and let the user choose rather than silently overwriting newer progress.
 - Do not store secrets in frontend code or commit API keys.
 - Treat sync as a later milestone unless a secure, maintainable backend already exists.
+
+### F. Online community game catalog (MongoDB-backed)
+
+Build an optional online catalog where users can discover and contribute text metadata and external resource links for GBA games and ROM hacks. This catalog is separate from each user's local ROM library and is not required to play games.
+
+**Data model — catalog entries may include:**
+
+- Game title and optional alternate title.
+- Platform, restricted to GBA for the initial release.
+- Region, language, version/revision, and game code when known.
+- Category/tags, such as Pokémon, RPG, homebrew, or ROM hack.
+- Short description and optional user-submitted notes.
+- External resource links with a resource type, such as official/project page, documentation, guide, cheats, or other relevant reference.
+- Contributor ID/display name when accounts are implemented, submission/updated timestamps, moderation status, and report count/status.
+- Optional canonical identity fields used for duplicate detection, such as normalized title + version + region. Do not treat a title alone as a reliable unique identifier.
+
+**Link and copyright policy:**
+
+- MongoDB stores metadata and URLs only—not ROM binaries, BIOS files, save files, screenshots containing copyrighted content, or other large game assets.
+- Do not turn the catalog into a ROM-hosting, ROM-scraping, or commercial ROM-download directory. Do not provide or promote links that clearly distribute unauthorized copyrighted ROMs or BIOS files.
+- Prefer official game/project pages, homebrew releases, documentation, guides, and cheat-reference pages. Any permitted external resource categories must be defined clearly in the UI and policy.
+- Label external links as user-submitted and open them safely. Validate URL schemes (HTTPS by default; allow HTTP only if explicitly justified), reject executable or unsafe schemes, and never render submitted content as trusted HTML.
+- Add report, moderation, and removal workflows. New submissions may remain pending until approved; rate-limit submissions and edits, detect duplicates, and maintain audit timestamps.
+- Do not automatically crawl external links or fetch remote page content in the browser. If link checking is added, perform it server-side with protections against SSRF, redirects to private/internal addresses, oversized responses, and abuse.
+- Do not imply that BrowserGBA endorses or guarantees third-party links. Provide clear warnings that external sites are outside the project's control.
+
+**Recommended architecture:**
+
+```text
+BrowserGBA frontend
+       |
+       | HTTPS requests
+       v
+Backend/API service
+       |
+       v
+MongoDB Atlas (free tier initially, subject to current limits)
+```
+
+- Never connect the browser directly to MongoDB or ship MongoDB credentials/connection strings in frontend code.
+- Put database access behind a backend API with schema validation, authentication/authorization as appropriate, rate limits, pagination, bounded search, and server-side moderation checks.
+- Use environment variables or the deployment platform's secret store for server-side credentials; never commit secrets.
+- Keep catalog endpoints separate from local emulator and IndexedDB logic. If the API or database is unavailable, local import, playback, saves, and exports must continue working.
+- Start with MongoDB Atlas's free tier only after verifying current availability, storage/throughput limits, regional options, backup behavior, and any inactivity/suspension rules. Design for quota exhaustion and provide a documented upgrade/migration path; do not assume the free tier is unlimited or permanent.
+- Store only the catalog data needed for the feature. Avoid collecting personal information or play history. Make contributor identity optional until a safe account model is designed; protect write endpoints from spam and abuse.
+- Suggested API capabilities: paginated catalog search/list, catalog entry details, submit entry, edit own entry where authorized, report link/entry, and moderator review. Final routes should follow the existing backend conventions if a backend is already present.
+- Validate and normalize all fields server-side; cap field lengths and link counts; add indexes for normalized title, tags, status, and other demonstrated query needs.
+- Add database schema/index setup, migration or seed strategy for non-copyrighted sample metadata, error handling, tests, and operational documentation. Never seed the database with commercial ROM files or unauthorized download links.
+
+**Suggested catalog entry shape (adapt to the existing stack):**
+
+```ts
+type CatalogResource = {
+  type: "official" | "project" | "guide" | "cheats" | "documentation" | "other";
+  label: string;
+  url: string;
+};
+
+type CatalogGame = {
+  id: string;
+  gameName: string;
+  platform: "GBA";
+  region?: string;
+  language?: string;
+  version?: string;
+  gameCode?: string;
+  description?: string;
+  tags: string[];
+  resources: CatalogResource[];
+  submittedBy?: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+Do not make a generic `downloadLink` field a promise that commercial ROMs are available. Resource types and moderation rules must prevent the catalog from becoming a centralized source of unauthorized ROM downloads.
 
 ## 6. Controls and accessibility
 
@@ -325,7 +416,7 @@ Engineering requirements:
 ## 9. Security, licensing, and privacy
 
 - Do not distribute commercial ROMs, copyrighted game artwork, BIOS files, or proprietary cheat databases.
-- Provide user-driven ROM import only. Do not add a ROM download catalog.
+- Provide user-driven ROM import only. An online metadata/resource catalog is allowed, but it must not host ROMs or become a directory for unauthorized commercial ROM downloads.
 - Respect all emulator-core and dependency licenses, including attribution and source-distribution obligations.
 - Include third-party notices where required.
 - Treat ROM files, imported save files, cheat text, and metadata as untrusted input. Validate sizes and structures; avoid unsafe HTML rendering or evaluation.
@@ -445,7 +536,17 @@ Agents should implement in small increments, preserving a buildable application 
 
 **Exit criteria:** Core flows work on target mobile and desktop browsers; offline shell launches after initial caching; user data remains local.
 
-### Phase 7 — Optional sync and advanced polish
+### Phase 7 — Online community catalog
+
+- Verify MongoDB Atlas free-tier limits and deployment requirements before committing to the provider.
+- Add a backend API and MongoDB-backed catalog for GBA game metadata and moderated external resource links only.
+- Implement validation, pagination/search, duplicate detection, moderation/reporting, rate limits, and safe external-link handling.
+- Keep the catalog independent from local ROM import, emulation, saves, and exports.
+- Add tests and document secrets/configuration, deployment, limits, backups, and failure behavior.
+
+**Exit criteria:** Catalog submissions and reads work through the backend; no database credentials are exposed to the browser; unauthorized ROM hosting is not supported; local play continues when the API/database is unavailable.
+
+### Phase 8 — Optional sync and advanced polish
 
 - Design and document sync conflicts and security.
 - Add opt-in sync only if a suitable backend and authentication model are approved.
@@ -510,7 +611,7 @@ Every task must:
 ## 14. Non-goals for the initial release
 
 - Other console emulation.
-- Hosting, downloading, or bundling commercial ROMs.
+- Hosting, downloading, or bundling commercial ROMs or BIOS files. The online catalog may list permitted metadata and approved external reference links only.
 - Accounts or cloud storage required for basic usage.
 - Multiplayer/link-cable emulation unless explicitly planned later.
 - A built-in copyrighted artwork or cheat-code scraping service.
