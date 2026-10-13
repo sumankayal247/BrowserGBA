@@ -93,22 +93,33 @@ embedding the app cross-origin, and asserts what each one can do.
 
 The sequence on a header-less host:
 
-1. **First visit** — the page is not isolated, so the emulator refuses to start. The
-   library, imports, exports and settings all work. The player shows
-   *“This page is not cross-origin isolated”* with a button,
-   **Enable playback (reloads once)**; the Compatibility screen offers the same
-   action as **Take over now (reloads once)**.
-2. **Pressing the button** waits for the worker to become the active controller of
-   this page (reloading before that would produce another non-isolated document and
-   waste the click), then reloads once.
-3. **Second visit** — every response now carries the headers, the document is
-   isolated, `SharedArrayBuffer` exists, and the game runs. Nothing is asked of the
-   user in the normal case: the worker was installed on the first visit, so coming
-   back later is enough.
+1. **First visit** — the page arrives un-isolated, so the emulator cannot start yet.
+   The library, imports, exports and settings all work. The app registers the worker
+   and then **reloads itself once**, saying so first (*“Setting playback up — reloading
+   this page once so the emulator can run on this host. Your library, saves and state
+   files are untouched.”*) and logging the reason to the console. The user is not asked
+   to do anything and does not have to know what cross-origin isolation is.
+2. **Second visit, and every visit after it** — every response carries the headers, the
+   document is isolated, `SharedArrayBuffer` exists, and the game runs. On a later visit
+   the worker is already installed, so there is not even a flicker.
+3. **If the automatic reload did not work** — for instance the browser refused to let a
+   worker take control — the app stops trying and explains: the notice names
+   `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy`, and the toast carries a
+   **Reload** button that waits for the worker before reloading, so one click is enough.
+   The player and the Compatibility screen offer the same repair as
+   **Enable playback (reloads once)** and **Take over now (reloads once)**.
 
-BrowserGBA never reloads the page on its own. There is no auto-repair, no redirect
-loop, and no state is touched: the worker changes response headers only, and the
-headers it adds are the ones a correctly configured host would have sent anyway.
+**There is no reload loop, and this is enforced, not hoped for.** The automatic repair
+happens at most once per tab: the tab records the attempt in `sessionStorage`, and every
+path that could reload again returns "manual" instead. A frame is never offered the
+repair at all, because browsers withhold cross-origin isolation from nested documents
+whatever the headers say. `tests/isolation.test.ts` pins the decision table (including
+the blocked-storage case, which counts as "already tried") and `npm run test:e2e` counts
+the document loads on a header-less origin — exactly two, never more — and drives the
+manual path on a fresh origin.
+
+Nothing but response headers is touched: the worker adds the two headers a correctly
+configured host would have sent, and ROMs, saves, states and cheats are never involved.
 
 Limits worth knowing:
 

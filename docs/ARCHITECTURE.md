@@ -95,12 +95,18 @@ on a blocking issue and explains it; the compatibility screen renders the same
 report. Nothing is gated on the detected engine: it labels the report, it does not
 decide what runs.
 
-`pwa/register.ts` can arrange isolation the host did not send, by letting the
-service worker answer with the two headers browsers require — see
-[DEPLOYMENT.md](DEPLOYMENT.md) for the full sequence. It is always user-initiated
-(one button, one reload), it refuses inside a frame where it could never work, and
-the module is explicit that it changes response headers only: ROMs, saves, states and
-cheats are untouched by it.
+`pwa/register.ts` can arrange isolation the host did not send, by letting the service
+worker answer with the two headers browsers require. `isolationRecoveryPlan()` decides
+what to do from page state alone — already isolated (nothing), a frame (nothing: the
+browser withholds isolation from nested documents), no worker (nothing), already tried
+in this tab (ask the user) — and only "recover" leads to the boot path in `main.ts`
+reloading the page once, after announcing it. The attempt is recorded per tab in
+`sessionStorage`, so the worst case is one reload per tab and never a loop; when storage
+is blocked the decision counts as "already tried" for the same reason. `main.ts` also
+gives the explanation a **Reload** button that waits for the worker to control the page
+before reloading, because reloading before that would land on another un-isolated
+document. The module is explicit that it changes response headers only: ROMs, saves,
+states and cheats are untouched by it.
 
 ## Links and metadata editing
 

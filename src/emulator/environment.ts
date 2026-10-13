@@ -207,7 +207,7 @@ export function detectEnvironment(override?: Partial<EnvironmentReport>): Enviro
       detail: report.isEmbedded
         ? 'BrowserGBA runs inside an embedded frame here, and browsers only grant cross-origin isolation to a top-level page. Open BrowserGBA in its own browser tab to play. (The library, imports, exports and backups all still work in this frame.)'
         : report.canSelfIsolate
-          ? 'The emulator core is threaded and needs SharedArrayBuffer, which is only granted to cross-origin isolated pages. This host does not send the isolation headers, so BrowserGBA is trying to supply them itself through its service worker — if this message stays, open the app in a new tab, or serve it with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (see docs/DEPLOYMENT.md).'
+          ? 'The emulator core is threaded and needs SharedArrayBuffer, which is only granted to cross-origin isolated pages. This host does not send the isolation headers, so BrowserGBA supplies them itself through its service worker; that takes one reload, which the app does for you unless this tab has already tried. If reloading does not clear this, serve the app with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (see docs/DEPLOYMENT.md).'
           : 'The emulator core is threaded and needs SharedArrayBuffer, which the browser only grants to cross-origin isolated pages. The server must send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` — see docs/DEPLOYMENT.md.',
     });
   }
