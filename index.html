@@ -26,6 +26,88 @@
         BrowserGBA needs JavaScript and WebAssembly to run the emulator.
       </p>
     </noscript>
+    <!--
+      Startup safety net.
+
+      Every way this page can fail to start is a *hosting* mistake, and a blank page
+      says nothing about which one it is. The two signals below are both definite
+      failures: a <script> that never loaded (a 404, or a response the browser refused
+      to run as a module), and an error thrown before anything mounted. If either
+      happens while #app is still empty, explain it.
+
+      The commonest cause by far is a static host serving this development shell,
+      which is exactly what happens when GitHub Pages is set to deploy from the branch
+      instead of running the build workflow. Styling is inline on purpose: when the
+      bundle is missing, styles.css is missing too.
+    -->
+    <script>
+      (function () {
+        var shown = false;
+
+        function failure(message) {
+          var mount = document.getElementById('app');
+          // Already running, or already explained: stay out of the way.
+          if (shown || !mount || mount.childElementCount > 0) return;
+          shown = true;
+
+          var wrap = document.createElement('main');
+          wrap.id = 'main';
+          wrap.className = 'boot-failure';
+          wrap.setAttribute('role', 'alert');
+          wrap.style.cssText =
+            'max-width:44rem;margin:0 auto;padding:2.5rem 1.25rem;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6';
+
+          var heading = document.createElement('h1');
+          heading.textContent = 'BrowserGBA could not start';
+          heading.style.cssText = 'font-size:1.5rem;margin:0 0 0.75rem';
+
+          var detail = document.createElement('p');
+          detail.textContent = message;
+          detail.style.cssText = 'margin:0 0 1rem';
+
+          var fixes = document.createElement('ul');
+          fixes.style.cssText = 'margin:0 0 1rem;padding-left:1.25rem';
+          [
+            'Deployed on GitHub Pages? Settings → Pages → Build and deployment → Source must be “GitHub Actions”, then re-run the “Deploy to GitHub Pages” workflow. Serving the branch publishes this development shell instead of a built app.',
+            'Running it yourself? Use npm run dev, or npm run build and serve the dist/ directory.',
+            'Details and host recipes: docs/DEPLOYMENT.md in the repository.',
+          ].forEach(function (text) {
+            var item = document.createElement('li');
+            item.textContent = text;
+            item.style.marginBottom = '0.5rem';
+            fixes.appendChild(item);
+          });
+
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = 'Reload';
+          button.style.cssText =
+            'font:inherit;padding:0.5rem 1rem;border-radius:8px;border:1px solid #37445c;background:#1c2434;color:#e7edf6;cursor:pointer';
+          button.addEventListener('click', function () {
+            globalThis.location.reload();
+          });
+
+          wrap.appendChild(heading);
+          wrap.appendChild(detail);
+          wrap.appendChild(fixes);
+          wrap.appendChild(button);
+          mount.appendChild(wrap);
+        }
+
+        window.addEventListener(
+          'error',
+          function (event) {
+            var target = event.target;
+            if (target && target.tagName === 'SCRIPT') {
+              failure('The application code did not load. The page you are on is the development shell, not a built app.');
+            } else if (target === window && typeof event.message === 'string') {
+              failure('The application code stopped before it could start.');
+            }
+          },
+          true,
+        );
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -358,6 +358,9 @@ Moderation covers spam, abuse and what the catalog itself stores — never the l
   own service worker answers with `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy`,
   so playback is one user-initiated reload away rather than impossible. — VERIFIED by the
   app-level browser suite across three origins (headers, none, cross-origin frame).
+- If a host serves the repository instead of the build (GitHub Pages set to deploy from the
+  branch, for instance), the page must explain that instead of rendering nothing — implemented
+  in `index.html` and verified by the end-to-end suite. — VERIFIED
 - Publish this repository to GitHub Pages (`https://sumankayal247.github.io/BrowserGBA/`) from
   `.github/workflows/deploy-pages.yml` on every push to `arena`/`main`, gated on `npm run
   check` so a red build never reaches the site. — IMPLEMENTED (install, tests and build all
