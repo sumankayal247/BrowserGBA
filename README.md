@@ -30,6 +30,12 @@ Pages site is a repository-admin action, and a workflow token is not allowed to 
 Until that setting exists, the deploy run finishes with a warning that names this step
 and skips publishing — the install, tests and build still run and are still reported.
 
+**If the pages site is already enabled but you see a blank page**, its source is set to
+serve the branch rather than the build (GitHub Pages calls that `legacy`). Serving the
+repository publishes the development shell, whose `/src/main.ts` a static host cannot
+transform. The page now says so itself, with the setting to change; `npm run test:e2e`
+checks that message, and the sub-path layout, on every run.
+
 One caveat that only applies to hosting like this: GitHub Pages cannot send response
 headers, so the first visit is not cross-origin isolated and the emulator refuses to
 start. The app's own service worker fixes that by serving the two headers browsers
@@ -47,7 +53,7 @@ Phases 0–6 of the plan in [`GAME_PLAN.md`](GAME_PLAN.md) are in place and gree
 | `npm test` | 165 tests across 9 files |
 | `npm run build` | 42 modules; `dist/` + service worker with 22 precache entries |
 | `npm run test:browser` | 17/17 — real browser, real mGBA core, fixture ROM |
-| `npm run test:e2e` | 61/61 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair → embed refusal → offline |
+| `npm run test:e2e` | 67/67 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair (header-less host **and** a repository sub-path) → embed refusal → offline |
 
 What is **not** verified is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), which
 mirrors the app's own Compatibility screen. In particular: no commercial ROM has

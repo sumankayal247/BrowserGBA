@@ -60,7 +60,16 @@ const PLAIN_BASE = `http://127.0.0.1:${PLAIN_PORT}`;
  * probe page: the app it frames lives on `BASE`.
  */
 const EMBED_PORT = Number(process.env.BROWSERGBA_E2E_EMBED_PORT ?? PORT + 2);
+/**
+ * The deployment shape GitHub Pages produces for a project site: the built app one
+ * directory down (`/BrowserGBA/`) on a host that cannot send response headers. Both
+ * halves matter — asset URLs and the service-worker scope have to survive the
+ * sub-path, and the isolation repair has to cope with the missing headers — so it
+ * gets its own origin rather than riding on the other header-less one.
+ */
+const SUBPATH_PORT = Number(process.env.BROWSERGBA_E2E_SUBPATH_PORT ?? PORT + 3);
 const EMBED_BASE = `http://127.0.0.1:${EMBED_PORT}`;
+const SUBPATH_BASE = `http://127.0.0.1:${SUBPATH_PORT}`;
 const ARTIFACTS = path.join(repoRoot, 'tests', 'browser', 'artifacts');
 
 async function buildApp() {
@@ -240,6 +249,11 @@ async function main() {
       { prefix: '/plain/', dir: path.join(repoRoot, 'tests', 'browser', 'plain'), isolated: false },
       { prefix: '/tests/', dir: path.join(repoRoot, 'tests') },
       { prefix: '/fixtures/', dir: path.join(repoRoot, 'fixtures') },
+      // The development shell, exactly as it sits in the repository: an entry module
+      // the browser cannot run plus assets that were never built. This is what a
+      // static host publishes when it serves the branch instead of the build, and the
+      // app is expected to say so rather than showing an empty page.
+      { prefix: '/devshell/', dir: repoRoot, isolated: false },
       { prefix: '', dir: path.join(repoRoot, 'dist') },
     ],
   });
@@ -249,6 +263,14 @@ async function main() {
     mounts: [
       { prefix: '/fixtures/', dir: path.join(repoRoot, 'fixtures'), isolated: false },
       { prefix: '', dir: path.join(repoRoot, 'dist'), isolated: false },
+    ],
+  });
+
+  const subpathServer = await startStaticServer({
+    port: SUBPATH_PORT,
+    mounts: [
+      { prefix: '/fixtures/', dir: path.join(repoRoot, 'fixtures'), isolated: false },
+      { prefix: '/BrowserGBA/', dir: path.join(repoRoot, 'dist'), isolated: false },
     ],
   });
 
@@ -739,6 +761,63 @@ async function main() {
     }
     await headerless.close();
 
+    // --- the layout GitHub Pages serves ---------------------------------------
+
+    // A project site lives one directory down, on a host that sends no headers, and
+    // `base: './'` in vite.config.ts is the only reason its asset URLs resolve. That
+    // combination is not covered anywhere else in the suite, so it is checked here.
+    const subPage = await browser.newPage();
+    const subWatcher = watchPage(subPage);
+    consoleErrors.push(...subWatcher.errors);
+    const subUrl = `${SUBPATH_BASE}/BrowserGBA/`;
+    await subPage.goto(subUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await subPage.waitForSelector('.app-header .brand', { timeout: 30000 });
+    checks.push(['the built app boots from a repository sub-path (the GitHub Pages layout)', true]);
+    checks.push([
+      'a properly built deployment does not show the development-shell warning',
+      (await subPage.$('.boot-failure')) === null,
+    ]);
+    checks.push([
+      'a sub-path deployment on a header-less host starts un-isolated',
+      (await subPage.evaluate(() => globalThis.crossOriginIsolated === true)) === false,
+    ]);
+    const scopeHandle = await subPage.waitForFunction(
+      async () => {
+        const registration = await navigator.serviceWorker.getRegistration();
+        return registration ? registration.scope : false;
+      },
+      { timeout: 25000, polling: 500 },
+    );
+    const subScope = await scopeHandle.jsonValue();
+    checks.push([
+      'the offline worker is scoped to the sub-path, not the domain root',
+      typeof subScope === 'string' && subScope.endsWith('/BrowserGBA/'),
+      String(subScope),
+    ]);
+    await subPage.screenshot({ path: path.join(ARTIFACTS, 'e2e-08-pages-subpath.png') });
+    await subPage.close();
+
+    // --- a host serving the wrong thing explains itself -----------------------
+
+    // The other half of the same story: when a host publishes the repository instead
+    // of the build, the page must say what is wrong instead of rendering nothing.
+    const devShellPage = await browser.newPage();
+    await devShellPage.goto(`${BASE}/devshell/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await devShellPage.waitForSelector('.boot-failure', { timeout: 20000 });
+    const bootMessage = await devShellPage.$eval('.boot-failure', (node) =>
+      (node.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    );
+    checks.push([
+      'a host serving the development shell explains the problem instead of showing a blank page',
+      /could not start/i.test(bootMessage) && /GitHub Actions/.test(bootMessage),
+      bootMessage.slice(0, 160),
+    ]);
+    checks.push([
+      'that explanation points at the built app rather than pretending to run',
+      (await devShellPage.$('.app-header')) === null,
+    ]);
+    await devShellPage.close();
+
     // --- embedded (non-isolated) context is explained, not fatal ----------
 
     const framePage = await browser.newPage();
@@ -811,6 +890,7 @@ async function main() {
     server.close();
     plainServer.close();
     embedServer.close();
+    subpathServer.close();
   }
 
   const failure = logChecks(SCRIPT, checks);

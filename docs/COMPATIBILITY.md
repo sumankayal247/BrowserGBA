@@ -39,7 +39,7 @@ you read about specific games elsewhere is not a statement from this project.
 | Feature | Level | Evidence |
 | --- | --- | --- |
 | Cross-origin isolation (required for playback) | implemented | The app-level browser test asserts isolation is granted by the documented headers, and that a framed page explains the block instead of failing. |
-| Working on a host that sends no isolation headers | implemented | Three origins are exercised: one with the headers, one with none, and one embedding the app cross-origin. The suite asserts the header-less origin starts un-isolated, that the blocked player offers the repair, that after one reload the page reports `crossOriginIsolated` and the game runs with fixture-accurate frames, and that a framed copy is refused rather than offered a repair it could not complete. |
+| Working on a host that sends no isolation headers | implemented | Four origins are exercised: one with the headers, one with none, one embedding the app cross-origin, and the repository sub-path layout GitHub Pages produces (no headers, app one directory down). The suite asserts the header-less origin starts un-isolated, that the blocked player offers the repair, that after one reload the page reports `crossOriginIsolated` and the game runs with fixture-accurate frames, and that a framed copy is refused rather than offered a repair it could not complete. |
 | Browser engines (Chromium, Firefox, Safari) | implemented | No Chromium-only APIs or too-new CSS — a unit test scans the source and the stylesheet and fails if one appears; defaults avoid keys a browser claims (F5/F9); engine detection is unit tested. The automated suites run in Chromium. A Firefox path exists (`BROWSERGBA_FIREFOX=… npm run test:browser`), but no Firefox build was available where this release was prepared, so **Firefox is untested here — not known-bad**. Safari is detected only. |
 | Haptic feedback on touch controls | implemented | Unit tests cover the on/off switch and that a missing or refusing implementation is ignored. The pulse itself is manual, and iOS Safari does not implement the API at all. |
 | Local library, saves and states | implemented | Unit tests run against a real IndexedDB implementation including quota and failure paths. |
@@ -60,8 +60,9 @@ npm run typecheck   clean (TypeScript 7, strict)
 npm test            165 tests, 9 files, all passing
 npm run build       42 modules, dist/ + sw.js with 22 precache entries
 npm run test:browser  17/17 checks (real Chromium + real mGBA core)
-npm run test:e2e      61/61 checks (real UI: import → play → save → export → backup → edit →
-                      cheat → remap → duplicate import → three-origin isolation/embed → offline)
+npm run test:e2e      67/67 checks (real UI: import → play → save → export → backup → edit →
+                      cheat → remap → duplicate import → three-origin isolation/embed →
+                      repository sub-path on a header-less host → offline)
 ```
 
 The browser suites need a browser binary (`BROWSERGBA_CHROMIUM=/path/to/chrome`, with

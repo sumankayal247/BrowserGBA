@@ -157,7 +157,34 @@ Because Pages cannot send response headers, the deployed site is the case descri
 above: the first visit registers the worker and everything except playback works,
 and playback follows on the next visit or immediately via the button. `base: './'`
 in `vite.config.ts` means the same build works at the root of a domain and in a
-repository sub-path.
+repository sub-path — and the end-to-end suite serves `dist/` one directory down on a
+header-less origin to prove both halves of that sentence, including that the worker's
+scope stays inside the sub-path instead of claiming the whole domain.
+
+## If the site loads but shows nothing
+
+A blank page on a self-hosted deployment is nearly always one of two hosting mistakes,
+and both are now reported in the page itself rather than left as an empty screen.
+
+**The host is serving the repository instead of the build.** The repository's own
+`index.html` is a *development* shell: it asks the browser for `/src/main.ts`, which a
+static host does not transform, so nothing runs. This is what a `legacy` Pages site
+does — with **Source: Deploy from a branch**, GitHub serves the branch root, which is
+why the first deployment of this project rendered exactly one link (`Skip to main
+content`) and a 404 for `/src/main.ts`. Fix it by pointing the host at the build:
+
+- GitHub Pages: **Settings → Pages → Build and deployment → Source: GitHub Actions**
+  (or, if you must stay on a branch, publish a `gh-pages` branch containing `dist/`).
+- Any other static host: upload/serve `dist/`, not the repository root.
+
+The dev shell now detects this itself: if the module script fails to load and nothing
+has mounted, it replaces the empty page with the explanation and the exact setting to
+change. `npm run test:e2e` serves the repository at `/devshell/` and asserts that
+message appears (and that a correctly built deployment never shows it).
+
+**The app started but the emulator is blocked.** That is the isolation notice
+described above, not a blank page — playback needs the headers or one reload, and the
+library keeps working meanwhile.
 
 ## MIME types and caching
 
