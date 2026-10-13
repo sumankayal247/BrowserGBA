@@ -16,7 +16,13 @@ import { notify } from '@/ui/toast';
 import { detectEnvironment, blockingIssues } from '@/emulator/environment';
 import { assertSupportedStorage, StorageUnsupportedError } from '@/storage/support';
 import { openDatabase, StorageError } from '@/storage/db';
-import { registerServiceWorker } from '@/pwa/register';
+import {
+  enableCrossOriginIsolation,
+  isolationFailureMessage,
+  isolationRecoveryPlan,
+  markIsolationRecoveryAttempted,
+  registerServiceWorker,
+} from '@/pwa/register';
 import { APP_NAME, APP_VERSION } from '@/version';
 import './styles.css';
 
@@ -62,17 +68,71 @@ export async function bootstrap(mountPoint: HTMLElement): Promise<App | null> {
     return null;
   }
 
-  // Report environment problems once, in plain language, without blocking use.
-  const blockers = blockingIssues(environment);
-  if (blockers.length > 0) {
-    notify.warning(blockers[0]!.label, blockers[0]!.detail);
-  }
-
   // Offline support is a bonus: never let it delay or break startup. The
   // service worker is only emitted by a production build, so dev skips it.
   if (import.meta.env.PROD) {
     void registerServiceWorker().catch((error) => {
       console.info('[BrowserGBA] Service worker not registered:', error);
+    });
+  }
+
+  // Report environment problems once, in plain language, without blocking use.
+  const blockers = blockingIssues(environment);
+
+  // Missing isolation on a host that cannot send headers is not something to explain
+  // and leave: the worker this app just registered can supply the headers itself, and
+  // all it costs is one reload. Do that instead of asking the user to press anything —
+  // but only once per tab (`isolationRecoveryPlan` refuses a second attempt), and only
+  // in a production build, where the worker exists to do the job.
+  const isolationBlocker = blockers.find((issue) => issue.id === 'no-isolation');
+  // Only a production build has the worker that makes this possible; without one there
+  // is nothing to try, and the plain explanation below is the honest answer.
+  const repairable = isolationBlocker !== undefined && import.meta.env.PROD && environment.canSelfIsolate;
+  const plan = repairable ? isolationRecoveryPlan() : null;
+
+  /**
+   * Reloads for isolation, waiting for the worker to be able to answer first.
+   *
+   * A plain `location.reload()` here would be a trap: the reload has to happen *after*
+   * the worker controls this page, or the next document is fetched from the network
+   * again and the user is back where they started, one click worse off. Both the
+   * automatic repair and the manual button go through this.
+   */
+  const reloadForIsolation = async (): Promise<void> => {
+    const outcome = await enableCrossOriginIsolation();
+    if (!outcome.reloading && !outcome.isolated) {
+      notify.warning('Playback is still blocked', isolationFailureMessage(outcome.reason));
+    }
+  };
+
+  if (plan?.action === 'recover') {
+    // Say why the page is about to flicker *before* it does, and say it in the same
+    // breath as what is unaffected.
+    console.info(
+      '[BrowserGBA] This host does not send the isolation headers; reloading once so the service worker can supply them.',
+    );
+    notify.info(
+      'Setting playback up',
+      'Reloading this page once so the emulator can run on this host. Your library, saves and state files are untouched.',
+    );
+    markIsolationRecoveryAttempted();
+    const outcome = await enableCrossOriginIsolation();
+    if (outcome.reloading || outcome.isolated) return app;
+    // The worker would not take control in time: fall back to the explanation, whose
+    // button tries the same thing again.
+    notify.warning(isolationBlocker!.label, isolationFailureMessage(outcome.reason), {
+      action: { label: 'Reload', onClick: () => void reloadForIsolation() },
+    });
+    return app;
+  }
+
+  if (blockers.length > 0) {
+    notify.warning(blockers[0]!.label, blockers[0]!.detail, {
+      // A reload fixes exactly the cases the worker can: this tab already spent its one
+      // automatic attempt, or the worker never got the chance to take over. It waits for
+      // the worker, so one click is enough.
+      action:
+        plan !== null ? { label: 'Reload', onClick: () => void reloadForIsolation() } : undefined,
     });
   }
 

@@ -37,11 +37,12 @@ transform. The page now says so itself, with the setting to change; `npm run tes
 checks that message, and the sub-path layout, on every run.
 
 One caveat that only applies to hosting like this: GitHub Pages cannot send response
-headers, so the first visit is not cross-origin isolated and the emulator refuses to
-start. The app's own service worker fixes that by serving the two headers browsers
-require; press **Enable playback (reloads once)** — or simply come back later — and
-games run. No configuration in the repository is needed for that; see
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+headers, so the *first* visit is not cross-origin isolated and the emulator cannot start
+yet. The app fixes that by itself — its service worker serves the two headers browsers
+require, and the page reloads once (telling you why) to pick them up. From the second
+visit onwards it is already isolated and nothing happens at all. If a reload ever does
+not clear it, the app says so and offers a **Reload** button rather than leaving you
+guessing; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Status
 
@@ -50,10 +51,10 @@ Phases 0–6 of the plan in [`GAME_PLAN.md`](GAME_PLAN.md) are in place and gree
 | Gate | Result |
 | --- | --- |
 | `npm run typecheck` | clean (TypeScript 7, `strict`) |
-| `npm test` | 165 tests across 9 files |
+| `npm test` | 174 tests across 10 files |
 | `npm run build` | 42 modules; `dist/` + service worker with 22 precache entries |
 | `npm run test:browser` | 17/17 — real browser, real mGBA core, fixture ROM |
-| `npm run test:e2e` | 67/67 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair (header-less host **and** a repository sub-path) → embed refusal → offline |
+| `npm run test:e2e` | 72/72 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair (header-less host **and** a repository sub-path) → embed refusal → offline |
 
 What is **not** verified is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), which
 mirrors the app's own Compatibility screen. In particular: no commercial ROM has

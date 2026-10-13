@@ -41,6 +41,80 @@ export async function registerServiceWorker(): Promise<ServiceWorkerStatus> {
   }
 }
 
+/**
+ * Key under which a tab records that it already tried the automatic repair.
+ *
+ * `sessionStorage` is per tab and survives reloads, which is exactly the scope we
+ * want: one attempt per tab, so a host where the trick cannot work is never reloaded
+ * twice, while a new tab (or a later visit) starts clean and usually finds the worker
+ * already installed.
+ */
+const RECOVERY_KEY = 'browsergba.isolation-recovery';
+
+/** What the app should do about missing cross-origin isolation, decided from state alone. */
+export type IsolationRecoveryPlan =
+  | { action: 'none'; reason: 'already-isolated' }
+  /** Register the worker and reload once: it can make the next load isolated. */
+  | { action: 'recover' }
+  /** Nothing left to try automatically; tell the user what to do instead. */
+  | { action: 'manual'; reason: 'embedded' | 'no-service-worker' | 'already-attempted' };
+
+/** True when this tab has already spent its one automatic reload. */
+export function isolationRecoveryAttempted(): boolean {
+  try {
+    return sessionStorage.getItem(RECOVERY_KEY) === '1';
+  } catch {
+    // Storage blocked (some privacy modes). Treat it as "already tried": reloading on
+    // every load would be worse than asking the user to reload once.
+    return true;
+  }
+}
+
+export function markIsolationRecoveryAttempted(): void {
+  try {
+    sessionStorage.setItem(RECOVERY_KEY, '1');
+  } catch {
+    /* nothing to record; the next load simply offers the manual path */
+  }
+}
+
+/**
+ * Decides whether missing isolation is worth repairing automatically.
+ *
+ * The one rule that matters: never reload twice for the same tab. Every branch that
+ * could otherwise loop returns `manual`, which is what the UI turns into a plain
+ * "reload" button and an explanation.
+ *
+ * @param options.isolated Overridable for tests; defaults to the real page state.
+ * @param options.embedded Overridable for tests; defaults to the real frame check.
+ * @param options.serviceWorker Overridable for tests; defaults to `canRegisterServiceWorker()`.
+ * @param options.attempted Overridable for tests; defaults to `isolationRecoveryAttempted()`.
+ */
+export function isolationRecoveryPlan(
+  options: {
+    isolated?: boolean;
+    embedded?: boolean;
+    serviceWorker?: boolean;
+    attempted?: boolean;
+  } = {},
+): IsolationRecoveryPlan {
+  const isolated = options.isolated ?? globalThis.crossOriginIsolated === true;
+  if (isolated) return { action: 'none', reason: 'already-isolated' };
+
+  const embedded = options.embedded ?? isEmbedded();
+  // A browser never grants cross-origin isolation to a nested document, so a reload
+  // inside a frame cannot help however many times it is tried.
+  if (embedded) return { action: 'manual', reason: 'embedded' };
+
+  const serviceWorker = options.serviceWorker ?? canRegisterServiceWorker();
+  if (!serviceWorker) return { action: 'manual', reason: 'no-service-worker' };
+
+  const attempted = options.attempted ?? isolationRecoveryAttempted();
+  if (attempted) return { action: 'manual', reason: 'already-attempted' };
+
+  return { action: 'recover' };
+}
+
 export interface IsolationResult {
   /** True when the document is cross-origin isolated now. */
   isolated: boolean;
@@ -112,6 +186,8 @@ export async function enableCrossOriginIsolation(
 /** Plain-language explanation for a failed isolation attempt. */
 export function isolationFailureMessage(reason: string | undefined): string {
   switch (reason) {
+    case 'already-attempted':
+      return 'Reloading this page once should be enough — this tab has already tried it automatically, so the button below will do it again. If it still does not work, the service worker is not being allowed to take over; check that site data is enabled for this page.';
     case 'embedded':
       return 'BrowserGBA cannot grant itself isolation inside a frame, and browsers never give it to a nested page. Open the app in its own tab instead.';
     case 'no-service-worker':

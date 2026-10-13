@@ -70,6 +70,15 @@ const EMBED_PORT = Number(process.env.BROWSERGBA_E2E_EMBED_PORT ?? PORT + 2);
 const SUBPATH_PORT = Number(process.env.BROWSERGBA_E2E_SUBPATH_PORT ?? PORT + 3);
 const EMBED_BASE = `http://127.0.0.1:${EMBED_PORT}`;
 const SUBPATH_BASE = `http://127.0.0.1:${SUBPATH_PORT}`;
+/**
+ * A header-less origin that is guaranteed cold — no worker has ever been registered
+ * for it — used to check what a user sees when the automatic repair has already been
+ * spent. (Trying to reuse the other header-less origin for this does not work: tearing
+ * a worker down and navigating immediately races with the browser's own teardown, and
+ * the next load can still arrive isolated.)
+ */
+const MANUAL_PORT = Number(process.env.BROWSERGBA_E2E_MANUAL_PORT ?? PORT + 4);
+const MANUAL_BASE = `http://127.0.0.1:${MANUAL_PORT}`;
 const ARTIFACTS = path.join(repoRoot, 'tests', 'browser', 'artifacts');
 
 async function buildApp() {
@@ -274,6 +283,14 @@ async function main() {
     ],
   });
 
+  const manualServer = await startStaticServer({
+    port: MANUAL_PORT,
+    mounts: [
+      { prefix: '/fixtures/', dir: path.join(repoRoot, 'fixtures'), isolated: false },
+      { prefix: '', dir: path.join(repoRoot, 'dist'), isolated: false },
+    ],
+  });
+
   const embedServer = await startStaticServer({
     port: EMBED_PORT,
     mounts: [{ prefix: '', dir: path.join(repoRoot, 'tests', 'browser', 'plain'), isolated: false }],
@@ -293,6 +310,8 @@ async function main() {
     });
     const watcher = watchPage(page);
     consoleErrors.push(...watcher.errors);
+    // App log lines, for checks like "the app said what it was doing".
+
 
     await captureDownloads(page);
 
@@ -719,8 +738,18 @@ async function main() {
 
     // --- a host that cannot send headers (how GitHub Pages behaves) -------
 
+    // First visit to such a host: the page cannot be isolated, the worker can fix that
+    // for the *next* load, and the app spends that reload itself rather than showing a
+    // notice and hoping the user reloads. Count the loads so a repair loop cannot hide
+    // here — exactly two document loads, never more.
     const headerless = await browser.newPage();
     await headerless.setViewport({ width: 1100, height: 800 });
+    const headerlessWatcher = watchPage(headerless);
+    consoleErrors.push(...headerlessWatcher.errors);
+    await headerless.evaluateOnNewDocument(() => {
+      const loads = Number(sessionStorage.getItem('e2e.loads') ?? '0') + 1;
+      sessionStorage.setItem('e2e.loads', String(loads));
+    });
     await headerless.goto(`${PLAIN_BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await headerless.waitForSelector('.app-header .brand', { timeout: 30000 });
     checks.push([
@@ -728,26 +757,36 @@ async function main() {
       (await headerless.evaluate(() => globalThis.crossOriginIsolated)) === false,
     ]);
 
-    // Importing is unaffected by isolation, so the library still works on such a host;
-    // the player is where the missing headers matter, and it offers to fix them.
+    // No click, no button: the app is expected to make the next load isolated on its own.
+    const selfRepaired = await headerless
+      .waitForFunction(() => globalThis.crossOriginIsolated === true, { timeout: 60000, polling: 250 })
+      .then(() => true)
+      .catch(() => false);
+    checks.push([
+      'the app repairs isolation by itself on a header-less host, without being asked',
+      selfRepaired === true,
+    ]);
+
+    const loadCount = await headerless.evaluate(() => Number(sessionStorage.getItem('e2e.loads') ?? '0'));
+    checks.push([
+      'the automatic repair reloads exactly once and cannot loop',
+      loadCount === 2,
+      `document loads: ${loadCount}`,
+    ]);
+    checks.push([
+      'the repair is announced, not a silent flicker',
+      headerlessWatcher.logs.some((line) => /reloading once so the service worker/.test(line)),
+      headerlessWatcher.logs.slice(-2).join(' | ').slice(0, 200),
+    ]);
+
+    // Importing is unaffected by isolation, so the library still works on such a host.
     await (await requireElement(headerless, '#rom-file-input', 'the ROM file input')).uploadFile(romPath);
     await headerless.waitForSelector('.game-card', { timeout: 30000 });
     await headerless.click('.game-card button.btn-primary');
-    await headerless.waitForSelector('.notice-danger', { timeout: 30000 });
-    const repairButton = await headerless.$eval('.notice-danger', (node) =>
-      [...node.querySelectorAll('button')].some((button) => /Enable playback/.test(button.textContent ?? '')),
-    );
-    checks.push(['the blocked player offers to supply the headers itself', repairButton === true]);
-
-    await clickButton(headerless, 'Enable playback (reloads once)', '.notice-danger');
-    // The click reloads the page once the worker controls it; the game then starts.
     const repairedCanvas = await headerless
       .waitForSelector('.screen-frame canvas', { timeout: 60000 })
       .catch(() => null);
-    checks.push([
-      'the app repairs isolation through its own service worker',
-      repairedCanvas !== null && (await headerless.evaluate(() => globalThis.crossOriginIsolated)) === true,
-    ]);
+    checks.push(['the repaired page plays the game without any prompt', repairedCanvas !== null]);
     await new Promise((resolve) => setTimeout(resolve, 1500));
     if (repairedCanvas) {
       await clickButton(headerless, 'Screenshot', '.control-strip');
@@ -759,6 +798,54 @@ async function main() {
       ]);
       await headerless.screenshot({ path: path.join(ARTIFACTS, 'e2e-06-self-isolated.png') });
     }
+
+    // The other half of the story, on its own cold origin: when the automatic attempt is
+    // already spent, the app must stop and ask rather than reloading again — and the
+    // retry has to be one click away. The flag is seeded before any app code runs, which
+    // is exactly the state a second visit to a header-less host arrives in.
+    const manual = await browser.newPage();
+    await manual.setViewport({ width: 1100, height: 800 });
+    const manualWatcher = watchPage(manual);
+    consoleErrors.push(...manualWatcher.errors);
+    await manual.evaluateOnNewDocument(() => {
+      sessionStorage.setItem('browsergba.isolation-recovery', '1');
+      const loads = Number(sessionStorage.getItem('e2e.manual-loads') ?? '0') + 1;
+      sessionStorage.setItem('e2e.manual-loads', String(loads));
+    });
+    await manual.goto(`${MANUAL_BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await manual.waitForSelector('.app-header .brand', { timeout: 30000 });
+    await manual.waitForSelector('.toast', { timeout: 30000 });
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const manualState = await manual.evaluate(() => {
+      const toast = document.querySelector('.toast');
+      return {
+        title: toast?.querySelector('strong')?.textContent?.trim() ?? '',
+        body: (toast?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        button: toast?.querySelector('button.btn')?.textContent?.trim() ?? null,
+        isolated: globalThis.crossOriginIsolated === true,
+        loads: Number(sessionStorage.getItem('e2e.manual-loads') ?? '0'),
+      };
+    });
+    checks.push([
+      'a tab that already spent its automatic attempt is told to reload instead of looping',
+      manualState.isolated === false && manualState.button === 'Reload' && manualState.loads === 1,
+      JSON.stringify(manualState).slice(0, 300),
+    ]);
+    checks.push([
+      'that message says what the reload is for',
+      /reload|isolation|SharedArrayBuffer/i.test(manualState.body),
+      manualState.body.slice(0, 200),
+    ]);
+
+    await manual.screenshot({ path: path.join(ARTIFACTS, 'e2e-09-isolation-manual.png') });
+    await clickButton(manual, 'Reload', '.toast');
+    const manualRepaired = await manual
+      .waitForFunction(() => globalThis.crossOriginIsolated === true, { timeout: 60000, polling: 250 })
+      .then(() => true)
+      .catch(() => false);
+    const manualLoads = await manual.evaluate(() => Number(sessionStorage.getItem('e2e.manual-loads') ?? '0'));
+    checks.push(['the offered reload does fix it, in one click', manualRepaired === true && manualLoads === 2, `loads: ${manualLoads}`]);
+    await manual.close();
     await headerless.close();
 
     // --- the layout GitHub Pages serves ---------------------------------------
@@ -891,6 +978,7 @@ async function main() {
     plainServer.close();
     embedServer.close();
     subpathServer.close();
+    manualServer.close();
   }
 
   const failure = logChecks(SCRIPT, checks);
