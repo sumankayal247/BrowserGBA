@@ -60,7 +60,7 @@ npm run typecheck   clean (TypeScript 7, strict)
 npm test            174 tests, 10 files, all passing
 npm run build       42 modules, dist/ + sw.js with 22 precache entries
 npm run test:browser  17/17 checks (real Chromium + real mGBA core)
-npm run test:e2e      72/72 checks (real UI: import → play → save → export → backup → edit →
+npm run test:e2e      75/75 checks (real UI: import → play → save → export → backup → edit →
                       cheat → remap → duplicate import → three-origin isolation/embed →
                       repository sub-path on a header-less host → offline)
 ```

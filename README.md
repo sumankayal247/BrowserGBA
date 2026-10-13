@@ -54,7 +54,7 @@ Phases 0–6 of the plan in [`GAME_PLAN.md`](GAME_PLAN.md) are in place and gree
 | `npm test` | 174 tests across 10 files |
 | `npm run build` | 42 modules; `dist/` + service worker with 22 precache entries |
 | `npm run test:browser` | 17/17 — real browser, real mGBA core, fixture ROM |
-| `npm run test:e2e` | 72/72 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair (header-less host **and** a repository sub-path) → embed refusal → offline |
+| `npm run test:e2e` | 75/75 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair (header-less host **and** a repository sub-path) → embed refusal → offline |
 
 What is **not** verified is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), which
 mirrors the app's own Compatibility screen. In particular: no commercial ROM has

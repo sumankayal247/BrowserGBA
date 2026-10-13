@@ -881,6 +881,43 @@ async function main() {
       typeof subScope === 'string' && subScope.endsWith('/BrowserGBA/'),
       String(subScope),
     ]);
+    // The app repaired isolation for itself here too (same automatic path as the
+    // header-less origin), and then it has to actually *play*. Booting is not enough:
+    // the emulator core is fetched at runtime, and an origin-root URL for it — instead
+    // of one resolved against the deployment's own directory — 404s on a project site
+    // while every static check still passes. That is exactly what this exercises.
+    const subRepaired = await subPage
+      .waitForFunction(() => globalThis.crossOriginIsolated === true, { timeout: 60000, polling: 250 })
+      .then(() => true)
+      .catch(() => false);
+    checks.push(['the sub-path deployment repairs isolation by itself as well', subRepaired === true]);
+
+    await (await requireElement(subPage, '#rom-file-input', 'the ROM file input')).uploadFile(romPath);
+    await subPage.waitForSelector('.game-card', { timeout: 30000 });
+    await subPage.click('.game-card button.btn-primary');
+    const subCanvas = await subPage.waitForSelector('.screen-frame canvas', { timeout: 60000 }).catch(() => null);
+    const subCoreFailure = await subPage
+      .$eval('.notice-danger h3', (node) => node.textContent?.trim() ?? '')
+      .catch(() => '');
+    checks.push([
+      'the emulator core loads from a sub-path deployment (no 404 for mgba.js)',
+      subCanvas !== null && !/could not start/i.test(subCoreFailure),
+      subCoreFailure || (subCanvas ? 'canvas present' : 'no canvas'),
+    ]);
+
+    if (subCanvas) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await dismissToasts(subPage);
+      await clickButton(subPage, 'Screenshot', '.control-strip');
+      await waitForCount(subPage, 'screenshots', 1);
+      const subShot = await analyseStoredScreenshot(subPage);
+      checks.push([
+        'the game really runs from a sub-path deployment (frames match the fixture)',
+        subShot?.rampOk === true && subShot?.sramMarker === 0xa5,
+        JSON.stringify(subShot).slice(0, 200),
+      ]);
+    }
+
     await subPage.screenshot({ path: path.join(ARTIFACTS, 'e2e-08-pages-subpath.png') });
     await subPage.close();
 

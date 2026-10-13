@@ -194,8 +194,19 @@ change. `npm run test:e2e` serves the repository at `/devshell/` and asserts tha
 message appears (and that a correctly built deployment never shows it).
 
 **The app started but the emulator is blocked.** That is the isolation notice
-described above, not a blank page — playback needs the headers or one reload, and the
-library keeps working meanwhile.
+described above, not a blank page — playback needs the headers or one reload (which the
+app now does for you), and the library keeps working meanwhile.
+
+**The app loads but a game refuses to start with “the emulator core could not be
+downloaded”.** Every URL the app uses is resolved against the deployment directory, not
+the domain root, so this should not happen; it did once, and the reason is worth knowing
+if you fork this. The emulator core is loaded at *runtime* (`import()` of `mgba/mgba.js`),
+which is why the build cannot check it: a URL written as `/mgba/mgba.js` works when the
+app is served from a domain root and 404s from a project sub-path such as
+`https://host/RepoName/`. `coreScriptUrl()` in `src/emulator/core.ts` resolves it against
+`document.baseURI` for exactly that reason, and `npm run test:e2e` serves `dist/` one
+directory down and **plays the fixture ROM there**, so the whole runtime path — module,
+wasm, pthread worker — is exercised in the deployment shape rather than assumed.
 
 ## MIME types and caching
 
