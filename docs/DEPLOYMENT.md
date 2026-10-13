@@ -132,17 +132,21 @@ tests) before `npm run build`, so a red build never reaches the published site, 
 uploads `dist/` with `actions/upload-pages-artifact@v4` for
 `actions/deploy-pages@v4`.
 
-The workflow asks `actions/configure-pages` to enable Pages by itself
-(`enablement: true`). **In this repository that request is refused**: creating a Pages
-site through the API needs repository-admin rights, and a workflow's `GITHUB_TOKEN`
-does not have them, so the run stops at `actions/configure-pages@v5` with a
-permissions error. Everything before it — `npm ci`, `npm run check` (type-check plus
-the full unit suite) and `npm run build` — passes in CI, so the only missing piece is
-the one-time setting, which a repository admin has to make:
+Creating a Pages site through the API needs repository-admin rights, and a workflow's
+`GITHUB_TOKEN` does not have them: `POST /repos/{owner}/{repo}/pages` answers
+*"Resource not accessible by integration"*. The workflow therefore **checks first**.
+If the repository has no Pages site it says so as a run warning, skips
+`configure-pages` and the deploy job, and finishes green — install, tests and build
+all still run and are still reported, so a genuine test failure is never hidden behind
+this. `enablement: true` is kept on `configure-pages` for repositories whose token is
+allowed to create the site, where the step below is unnecessary.
+
+For this repository the one-time step is therefore an admin action:
 
 1. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. Re-run the workflow (Actions → Deploy to GitHub Pages → Re-run jobs), or push
-   anything to `arena`/`main`.
+   anything to `arena`/`main`. The next run finds the site, runs
+   `configure-pages`, uploads `dist/` and publishes it.
 
 The site then lives at `https://<user>.github.io/<repo>/` — for this repository,
 <https://sumankayal247.github.io/BrowserGBA/>. `enablement: true` stays in the

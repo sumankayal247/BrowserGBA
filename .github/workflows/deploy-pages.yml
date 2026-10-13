@@ -33,6 +33,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      # Lets the deploy job skip itself instead of failing when Pages is not enabled.
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
     steps:
       - uses: actions/checkout@v5
 
@@ -51,20 +54,35 @@ jobs:
       # public/mgba/, together with its notice and a manifest of what was copied.
       - run: npm run build
 
-      # `enablement: true` lets the workflow turn Pages on itself, so the first run
-      # of this file publishes the site instead of failing until someone flips the
-      # repository setting by hand. It is a no-op once Pages exists. If the token
-      # cannot enable it (permissions changed, or Pages was disabled deliberately),
-      # this step says so and the repository setting remains the fallback path.
+      # Creating a Pages site is a repository-admin action: a workflow token is
+      # refused by `POST /repos/{owner}/{repo}/pages` with "Resource not accessible by
+      # integration", and `configure-pages` (even with enablement) fails with it. That
+      # is a one-time repository setting, not a defect in this project, so ask first
+      # and stop with an explanation instead of turning every push on `main` red.
+      - id: pages
+        name: Check whether Pages is enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/pages" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Pages is not enabled::This repository has no GitHub Pages site, and only a repository admin can create one. Set Settings → Pages → Build and deployment → Source: GitHub Actions, then re-run this workflow. Everything else in this run — install, tests, build — passed; the site was not published."
+          fi
+
       - uses: actions/configure-pages@v5
+        if: steps.pages.outputs.enabled == 'true'
         with:
           enablement: true
       - uses: actions/upload-pages-artifact@v4
+        if: steps.pages.outputs.enabled == 'true'
         with:
           path: dist
 
   deploy:
     needs: build
+    if: needs.build.outputs.pages_enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

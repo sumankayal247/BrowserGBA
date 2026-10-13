@@ -27,8 +27,8 @@ The site is published by `.github/workflows/deploy-pages.yml` on every push to
 `arena` or `main`. Publishing needs Pages turned on once for the repository
 (**Settings → Pages → Build and deployment → Source: GitHub Actions**): creating a
 Pages site is a repository-admin action, and a workflow token is not allowed to do it.
-Until that setting exists the deploy run stops at its `configure-pages` step with a
-permissions error, after the install, tests and build have already passed.
+Until that setting exists, the deploy run finishes with a warning that names this step
+and skips publishing — the install, tests and build still run and are still reported.
 
 One caveat that only applies to hosting like this: GitHub Pages cannot send response
 headers, so the first visit is not cross-origin isolated and the emulator refuses to
