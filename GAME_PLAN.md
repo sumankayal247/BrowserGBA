@@ -135,6 +135,14 @@ Keep save states distinct from a game's normal in-game battery save.
 - Provide manual save/flush where the core supports it, plus automatic persistence at safe points.
 - Provide import and export of battery-save files (commonly `.sav`), with clear format/size validation.
 - Back up before importing a replacement save; confirm before overwriting.
+  — **IMPLEMENTED and covered by tests**: the file is judged by its bytes alone (a battery
+  save is a fixed-size image of save memory, so 512 B / 8 KiB / 32 KiB / 64 KiB / 128 KiB are
+  the only accepted sizes and anything else is refused with the size that was found); the save
+  being replaced is copied to a `pre-overwrite` record before the import is written; and the
+  replacement is confirmed in a dialog first — in the player the game then restarts on the
+  imported bytes immediately, from the game's page it takes effect on the next launch. Unit
+  tests pin the validation and the backup semantics, and the end-to-end suite loads a save
+  back through the real picker and compares the stored bytes with the file it handed over.
 - Offer multiple backup generations or a simple recovery mechanism.
 - Show the last successful save time and visible warnings when storage fails.
 - Do not claim a save is safe until the persistence operation succeeds.

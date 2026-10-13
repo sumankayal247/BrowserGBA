@@ -21,13 +21,14 @@ import {
   type EmulatorAction,
   type GbaButton,
 } from '@/input/bindings';
-import { downloadBlob, safeFileName } from '@/ui/dom';
+import { downloadBlob, humanBytes, safeFileName } from '@/ui/dom';
 import { computeViewport, filterStyles } from '@/render/display';
 import type { EmulatorCore } from '@/emulator/core';
 import { EmulatorSession, type SaveStateFeedback, type SessionSettings } from '@/emulator/session';
 import type { CheatRecord, GameRecord } from '@/storage/records';
 import { recordPlaySession } from '@/library/library';
 import { notify } from '@/ui/toast';
+import { checkSaveFile } from '@/storage/save-file';
 
 export interface PlayerOptions {
   core: EmulatorCore;
@@ -344,6 +345,34 @@ export class PlayerController {
       notify.success('Progress saved');
     } catch (error) {
       notify.error('Could not save', error instanceof Error ? error.message : 'Unknown error');
+    }
+  }
+
+  /**
+   * Loads a battery save the user picked from their own machine.
+   *
+   * The file is checked before anything is written, the running game is restarted
+   * on the new save, and the previous save is kept as a backup — see
+   * `EmulatorSession.importSaveAndReload` for the ordering that makes that safe.
+   */
+  async importSaveFile(file: File): Promise<boolean> {
+    const check = checkSaveFile(file.name, file.size);
+    if (!check.ok) {
+      notify.error('That save file cannot be used', check.reason);
+      return false;
+    }
+
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const record = await this.session.importSaveAndReload(bytes, `imported from ${file.name}`);
+      notify.success(
+        'Save loaded',
+        `${humanBytes(record.size)} ${check.label} from ${file.name} — the game restarted on it. Your previous save was kept as a backup.`,
+      );
+      return true;
+    } catch (error) {
+      notify.error('Could not load the save', error instanceof Error ? error.message : 'Unknown error');
+      return false;
     }
   }
 

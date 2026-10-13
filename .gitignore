@@ -12,6 +12,11 @@ public/mgba/
 # but reproducible, so not committed).
 fixtures/*.gba
 
+# Homebrew ROMs fetched for the optional gameplay lane (`npm run test:gameplay`
+# fetches two MIT-licensed ones). Downloaded on demand, never committed: this
+# repository ships no ROMs, however free they are.
+fixtures/games/
+
 # Local scratch / device dumps. Never commit ROMs, BIOS files or saves.
 *.local
 .local/

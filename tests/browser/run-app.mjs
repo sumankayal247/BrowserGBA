@@ -458,6 +458,125 @@ async function main() {
       JSON.stringify(exported),
     ]);
 
+    // --- loading a save file the user brings from outside ------------------
+
+    /**
+     * Hands a file to the app's own save picker, the way a user's file chooser
+     * does: a real `File` in the input's `files`, then the change event.
+     *
+     * `source` is what the file should contain — the game's own stored save
+     * (`stored`), an arbitrary number of bytes (a wrong-size file), or the most
+     * recent captured download.
+     */
+    const importSaveFile = async (name, source) =>
+      page.evaluate(
+        async ({ fileName, from }) => {
+          let bytes;
+          if (from === 'stored') {
+            const row = await new Promise((resolve) => {
+              const open = indexedDB.open('browsergba');
+              open.onsuccess = () => {
+                const rows = open.result
+                  .transaction('batterySaves', 'readonly')
+                  .objectStore('batterySaves')
+                  .getAll();
+                rows.onsuccess = () => resolve(rows.result.sort((a, b) => b.savedAt - a.savedAt)[0]);
+              };
+            });
+            bytes = new Uint8Array(row.bytes);
+          } else if (from === 'download') {
+            bytes = new Uint8Array(await globalThis.__bgbaDownloads.downloads.at(-1).blob.arrayBuffer());
+          } else {
+            bytes = new Uint8Array(Number(from));
+          }
+          const file = new File([bytes], fileName, { type: 'application/octet-stream' });
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          const input = document.querySelector('#save-file-input');
+          input.files = transfer.files;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          globalThis.__lastImportedSave = bytes;
+          return bytes.length;
+        },
+        { fileName: name, from: source },
+      );
+
+    // A file that is not a cartridge save must be refused before anything is written.
+    await dismissToasts(page);
+    const savesBeforeRefusal = await countStore(page, 'batterySaves');
+    await importSaveFile('not-a-save.sav', '100');
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const refusal = await page.$eval('.toast', (node) => node.textContent ?? '').catch(() => '');
+    checks.push([
+      'a file that is not a cartridge save is refused in plain language',
+      /cannot be used/i.test(refusal) && /100 bytes/.test(refusal),
+      refusal.slice(0, 160),
+    ]);
+    checks.push([
+      'a refused save file writes nothing and is never offered as a choice',
+      (await countStore(page, 'batterySaves')) === savesBeforeRefusal &&
+        (await page.$('dialog.dialog[open]')) === null,
+    ]);
+
+    // Then the real thing: load this game's own save back through the picker.
+    // It must ask before replacing the progress that is running.
+    await dismissToasts(page);
+    await importSaveFile('from-my-machine.sav', 'stored');
+    const confirmTitle = await page
+      .waitForSelector('dialog.dialog[open] h2', { timeout: 10000 })
+      .then((node) => node.evaluate((el) => el.textContent?.trim() ?? ''))
+      .catch(() => '');
+    checks.push([
+      'loading a save over a running game asks first',
+      /from-my-machine\.sav/.test(confirmTitle),
+      confirmTitle,
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await clickButton(page, 'Load save', 'dialog.dialog');
+    await waitForCount(page, 'batterySaves', savesBeforeRefusal + 1);
+    const afterImport = await readIndexedDb(page, 'batterySaves');
+    const importedRow = afterImport.find((row) => row.kind === 'import');
+    const backupRow = afterImport.find((row) => row.kind === 'pre-overwrite');
+    checks.push([
+      'the imported save is kept as an import, with the save it replaced kept as a backup',
+      Boolean(importedRow) && Boolean(backupRow),
+      afterImport.map((row) => row.kind).join(','),
+    ]);
+    // Compared byte for byte against the file that was handed to the picker, in
+    // the page: a stored save must be the user's bytes, not a re-encoded copy.
+    const importMatches = await page.evaluate(async () => {
+      const rows = await new Promise((resolve) => {
+        const open = indexedDB.open('browsergba');
+        open.onsuccess = () => {
+          const all = open.result.transaction('batterySaves', 'readonly').objectStore('batterySaves').getAll();
+          all.onsuccess = () => resolve(all.result);
+        };
+      });
+      const imported = rows
+        .filter((row) => row.kind === 'import')
+        .sort((a, b) => b.savedAt - a.savedAt)[0];
+      if (!imported) return { size: 0, match: false };
+      const stored = new Uint8Array(imported.bytes);
+      const handed = globalThis.__lastImportedSave;
+      const match = stored.length === handed.length && stored.every((byte, index) => byte === handed[index]);
+      return { size: stored.length, match };
+    });
+    checks.push([
+      'the imported save holds exactly the bytes from the file, not a placeholder',
+      importedRow?.size === 32768 && importMatches.match,
+      `size=${importMatches.size} byteForByte=${importMatches.match}`,
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const importToast = await page.$eval('.toast', (node) => node.textContent ?? '').catch(() => '');
+    checks.push([
+      'the game restarts on the loaded save and says so',
+      (await page.$('.screen-frame canvas')) !== null &&
+        (await page.$('.notice-danger')) === null &&
+        /Save loaded/i.test(importToast),
+      importToast.slice(0, 160),
+    ]);
+    await page.screenshot({ path: path.join(ARTIFACTS, 'e2e-10-save-import.png') });
+
     // Save state via the default keyboard shortcut, then load it back.
     //
     // The defaults are F2/F4 on purpose: F5 is "reload" and F9 is Reader View in
@@ -524,10 +643,31 @@ async function main() {
     await page.goto(`${BASE}/#/play/${encodeURIComponent(otherGame.id)}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.screen-frame canvas', { timeout: 30000 });
     await new Promise((resolve) => setTimeout(resolve, 1500));
+    // A toast left over from the cheat editor floats over the control strip on
+    // short windows and would swallow this click (the strip's buttons do not
+    // exist at fixed coordinates, so no layout can be assumed). Dismiss first,
+    // exactly as the rest of the suite does before acting on a control.
+    await dismissToasts(page);
     await clickButton(page, 'Screenshot', '.control-strip');
     await new Promise((resolve) => setTimeout(resolve, 800));
     const otherShot = await analyseStoredScreenshot(page, otherGame.id);
-    checks.push(['the other game runs and renders its own frames', otherShot?.rampOk === true]);
+    // Failing here means the screenshot never reached storage; report what the
+    // store actually holds for this game so the failure explains itself.
+    const shotsForOtherGame = await page.evaluate(async (target) => {
+      const rows = await new Promise((resolve) => {
+        const open = indexedDB.open('browsergba');
+        open.onsuccess = () => {
+          const all = open.result.transaction('screenshots', 'readonly').objectStore('screenshots').getAll();
+          all.onsuccess = () => resolve(all.result.filter((row) => row.gameId === target).length);
+        };
+      });
+      return rows;
+    }, otherGame.id);
+    checks.push([
+      'the other game runs and renders its own frames',
+      otherShot?.rampOk === true,
+      `rampOk=${String(otherShot?.rampOk)} screenshotsStored=${shotsForOtherGame}`,
+    ]);
     checks.push(['the other game has no cheats of its own', (await readIndexedDb(page, 'cheats')).length === 1]);
 
     // --- key remapping ----------------------------------------------------

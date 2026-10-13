@@ -21,6 +21,8 @@ import { CHEAT_FORMAT_LIST, sanitiseLabel, validateCheatCode } from '@/cheats/ch
 import type { CheatFormat } from '@/storage/records';
 import { batterySavesRepo, cheatsRepo, saveStatesRepo, screenshotsRepo } from '@/storage/records';
 import { nextRecordId } from '@/storage/ids';
+import { checkSaveFile } from '@/storage/save-file';
+import { writeImportedSave } from '@/storage/save-import';
 import {
   backupFileName,
   buildBackupBundle,
@@ -72,6 +74,7 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
 
   const statesHost = el('div');
   const savesHost = el('div');
+  const saveImportHost = el('div');
   const cheatsHost = el('div');
   const shotsHost = el('div');
 
@@ -405,6 +408,90 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
   }
 
   // --- battery saves -----------------------------------------------------
+
+  /**
+   * "Load a save file": drop a `.sav`/`.srm` from anywhere — another emulator, an
+   * older export of this app, a real cartridge dump — onto this game.
+   *
+   * Validated by size only (that is all a battery save *is*: a blob of save
+   * memory), written with the previous save kept as a backup, and effective the
+   * next time the game starts. The library copy is deliberately not applied to a
+   * running game here; the player's own "Load save…" does that.
+   */
+  function renderSaveImport(): void {
+    saveImportHost.textContent = '';
+
+    const input = el('input', {
+      className: 'visually-hidden',
+      attrs: {
+        type: 'file',
+        accept: '.sav,.srm,.bin,application/octet-stream',
+        id: 'save-import-input',
+      },
+    }) as HTMLInputElement;
+
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (file) void importSaveFile(file);
+    });
+
+    saveImportHost.appendChild(
+      el('div', {
+        attrs: { style: 'display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.75rem;' },
+        children: [
+          el('button', {
+            className: 'btn btn-sm',
+            text: 'Load a save file\u2026',
+            attrs: {
+              type: 'button',
+              title: 'Replace this game\u2019s battery save with a .sav/.srm file from your machine',
+            },
+            on: { click: () => input.click() },
+          }),
+          el('span', {
+            className: 'small muted',
+            text: '32 KiB SRAM, 8 KiB or 512 B EEPROM, or 64/128 KiB flash. Your current save is kept as a backup.',
+          }),
+        ],
+      }),
+    );
+    saveImportHost.appendChild(input);
+  }
+
+  async function importSaveFile(file: File): Promise<void> {
+    const check = checkSaveFile(file.name, file.size);
+    if (!check.ok) {
+      notify.error('That save file cannot be used', check.reason);
+      return;
+    }
+
+    const confirmed = await confirmDialog({
+      title: `Replace ${title}\u2019s save?`,
+      description: `${check.label} from ${file.name} becomes this game\u2019s save. The save it replaces is kept below as a backup, and the game picks the new one up the next time you start it.`,
+      confirmLabel: 'Load save',
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const record = await writeImportedSave({
+        gameId,
+        bytes,
+        note: `imported from ${file.name}`,
+        nextId: (kind) => nextRecordId(kind, gameId),
+        now: () => Date.now(),
+      });
+      notify.success(
+        'Save imported',
+        `${humanBytes(record.size)} ${check.label} from ${file.name} — it will be used the next time you start this game. The save it replaced is kept below as a backup.`,
+      );
+      await renderSaves();
+    } catch (error) {
+      notify.error('Could not import the save', error instanceof Error ? error.message : 'Unknown error');
+    }
+  }
 
   async function renderSaves(): Promise<void> {
     const saves = await batterySavesRepo.listForGame(gameId);
@@ -791,6 +878,7 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
   }
 
   await Promise.all([renderStates(), renderSaves(), renderCheats(), renderShots()]);
+  renderSaveImport();
   const romPresent = (await getRomBytes(gameId)) !== null;
 
   const element = el('section', {
@@ -832,6 +920,7 @@ export async function renderGameView(context: ViewContext): Promise<ViewInstance
             text: 'Automatic saves are written when the game’s save data changes; manual ones are triggered by you.',
           }),
           savesHost,
+          saveImportHost,
         ],
       }),
       el('div', {
