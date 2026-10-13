@@ -362,9 +362,9 @@ Moderation covers spam, abuse and what the catalog itself stores — never the l
   `.github/workflows/deploy-pages.yml` on every push to `arena`/`main`, gated on `npm run
   check` so a red build never reaches the site. — IMPLEMENTED (install, tests and build all
   pass in CI). Publishing still needs the one-time repository setting **Settings → Pages →
-  Source: GitHub Actions**: the workflow asks `configure-pages` to enable Pages, but a
-  `GITHUB_TOKEN` has no repository-admin rights, so that request is refused — documented in
-  `docs/DEPLOYMENT.md`.
+  Source: GitHub Actions**, because creating a Pages site needs repository-admin rights that a
+  `GITHUB_TOKEN` does not have; until then the workflow warns and skips publishing instead of
+  failing — documented in `docs/DEPLOYMENT.md`.
 - The deployed site has everything except the database-backed catalog, which is Phase 7 and
   exists nowhere yet. The README states this next to the link so the limitation is not
   discovered by surprise.
