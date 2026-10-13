@@ -151,8 +151,27 @@ export const MGBA_CAPABILITIES: CoreCapabilities = {
   versionReporting: true,
 };
 
-/** Where the vendored core is served from. */
-export const CORE_SCRIPT_URL = '/mgba/mgba.js';
+/**
+ * Where the vendored core is served from.
+ *
+ * Resolved against the *document* base, not the origin root. The core is loaded with a
+ * dynamic `import()`, which resolves a relative specifier against the importing module's
+ * URL — that would look for `assets/mgba/mgba.js` next to the bundle. An absolute
+ * `/mgba/mgba.js` is worse: on a project site (`https://host/BrowserGBA/`) it asks the
+ * domain root for a file that only exists under the sub-path, which is exactly how the
+ * live GitHub Pages deployment failed with "the emulator core could not be downloaded".
+ * `document.baseURI` is the one anchor that is correct in both cases, because the app
+ * uses hash routing and therefore never moves away from its base directory.
+ */
+export function coreScriptUrl(): string {
+  const base = globalThis.document?.baseURI ?? globalThis.location?.href;
+  if (!base) return 'mgba/mgba.js';
+  try {
+    return new URL('mgba/mgba.js', base).href;
+  } catch {
+    return 'mgba/mgba.js';
+  }
+}
 
 export class CoreUnavailableError extends Error {
   constructor(message: string, override readonly cause?: unknown) {

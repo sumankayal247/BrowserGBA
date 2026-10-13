@@ -17,7 +17,7 @@
  */
 import { GBA_BUTTONS } from '@/input/bindings';
 import {
-  CORE_SCRIPT_URL,
+  coreScriptUrl,
   CoreUnavailableError,
   MGBA_CAPABILITIES,
   MGBA_CORE_INFO,
@@ -133,10 +133,12 @@ export class MgbaCore implements EmulatorCore {
     }
 
     let factory: (options: { canvas: HTMLCanvasElement }) => Promise<MgbaModule>;
+    const coreUrl = coreScriptUrl();
     try {
-      // Served verbatim from /mgba/ so the pthread worker URL inside the module
-      // still resolves. See scripts/sync-core.mjs and docs/ARCHITECTURE.md.
-      const imported = (await import(/* @vite-ignore */ CORE_SCRIPT_URL)) as {
+      // Served verbatim from the deployment's own `mgba/` directory so the pthread
+      // worker URL inside the module still resolves. See scripts/sync-core.mjs and
+      // docs/ARCHITECTURE.md.
+      const imported = (await import(/* @vite-ignore */ coreUrl)) as {
         default?: unknown;
       };
       factory = (imported.default ?? imported) as typeof factory;
@@ -145,7 +147,7 @@ export class MgbaCore implements EmulatorCore {
       }
     } catch (error) {
       throw new CoreUnavailableError(
-        'The emulator core could not be downloaded. Run `npm run sync:core` and reload, and check that /mgba/mgba.js is reachable.',
+        `The emulator core could not be downloaded. Check that ${coreUrl} is reachable (it is built by \`npm run sync:core\`, which the build runs for you).`,
         error,
       );
     }
