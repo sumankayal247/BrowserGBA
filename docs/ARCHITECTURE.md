@@ -62,6 +62,19 @@ they are JSON files meant to be portable).
 cheats are keyed by `gameId`, which is derived from the ROM's SHA-256, so progress
 cannot be attached to the wrong game even if two files share a title.
 
+## Bringing a save file in
+
+A battery save is a raw image of cartridge save memory — no header, no metadata — so the only
+thing that can be checked before use is its size, and `src/storage/save-file.ts` is the single
+place that decides (512 B, 8 KiB, 32 KiB, 64 KiB, 128 KiB; the file name is reported back to
+the user but never used to decide). `src/storage/save-import.ts` writes the replacement and
+always copies the current save to a `pre-overwrite` record first, so an import is reversible.
+Both entry points share it: the game's page (effective on the next launch) and the player,
+where `EmulatorSession.importSaveAndReload()` also restarts the running cartridge on the
+imported bytes — flushing the live save first so the backup is real, reloading the ROM with
+the new save, and reallocating the rewind history so stepping back cannot resurrect the
+timeline the imported save replaced.
+
 ## Session lifecycle
 
 `EmulatorSession.start()` loads the core, writes the ROM into its filesystem,

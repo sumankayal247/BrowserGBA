@@ -15,6 +15,7 @@
 import type { GameRecord, BatterySaveRecord, CheatRecord, SaveStateRecord, ScreenshotRecord } from '@/storage/records';
 import { batterySavesRepo, cheatsRepo, saveStatesRepo, screenshotsRepo } from '@/storage/records';
 import { hashBytesHex } from '@/storage/hash';
+import { writeImportedSave } from '@/storage/save-import';
 import { nextRecordId } from '@/storage/ids';
 import { serialiseCheatFile } from '@/cheats/cheats';
 import { GBA_BUTTONS, isGbaButton, type GbaButton } from '@/input/bindings';
@@ -568,25 +569,73 @@ export class EmulatorSession {
    * over live progress is always reversible.
    */
   async importSave(bytes: Uint8Array, note = 'imported save'): Promise<BatterySaveRecord> {
-    const existing = await batterySavesRepo.latest(this.game.id);
-    if (existing) {
-      await batterySavesRepo.put({ ...existing, id: this.recordId('pre-overwrite'), kind: 'pre-overwrite' });
-    }
-
-    const copy = bytes.slice();
-    const record: BatterySaveRecord = {
-      id: this.recordId('import'),
+    const record = await writeImportedSave({
       gameId: this.game.id,
-      kind: 'import',
-      bytes: copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength),
-      size: copy.byteLength,
-      savedAt: this.now(),
-      hash: await hashBytesHex(copy),
+      bytes,
       note,
-    };
-    await batterySavesRepo.put(record);
+      nextId: (kind) => this.recordId(kind),
+      now: () => this.now(),
+    });
     this.lastSavedHash = record.hash;
     this.lastPersistedSaveAt = record.savedAt;
+    return record;
+  }
+
+  /**
+   * Replaces the cartridge save with imported bytes *and* restarts the running
+   * game on them, which is what "load this save file" has to mean once a game is
+   * already open — writing the record alone would leave the core holding the old
+   * save in memory and flush it back over the import on the next autosave.
+   *
+   * Order matters and is the whole point of this method:
+   *
+   *   1. cancel the pending autosave, then persist whatever the live game has,
+   *      so the pre-overwrite backup is the real latest progress;
+   *   2. write the imported record (which takes that backup);
+   *   3. reload the ROM with the imported bytes, so the cartridge starts on them;
+   *   4. mark the session clean *with the imported hash*, so the next flush sees
+   *      no change and cannot undo the import.
+   */
+  async importSaveAndReload(bytes: Uint8Array, note = 'imported save'): Promise<BatterySaveRecord> {
+    if (this.disposed) {
+      throw new SessionError('This game session is closed. Open the game again to load a save.', 'disposed');
+    }
+
+    if (this.pendingSaveTimer) {
+      clearTimeout(this.pendingSaveTimer);
+      this.pendingSaveTimer = null;
+    }
+    if (this.saveDirty) {
+      await this.flushSave('before-load');
+    }
+
+    const record = await this.importSave(bytes, note);
+
+    const reloaded = await this.core.loadRom({
+      romFileName: this.romFileName(),
+      bytes: this.romBytes,
+      saveBytes: new Uint8Array(record.bytes),
+    });
+    if (!reloaded) {
+      throw new SessionError(
+        'The emulator could not restart this ROM with that save file. The game is unchanged.',
+        'load-failed',
+      );
+    }
+
+    this.saveDirty = false;
+    // The rewind buffer still holds frames from the previous save's timeline;
+    // stepping back into them would resurrect a cartridge state that no longer
+    // exists. Re-applying the setting reallocates it, which drops the history.
+    if (this.rewinding) this.stopRewind();
+    this.core.applySettings({
+      rewindEnabled: this.settings.rewindEnabled,
+      rewindBufferCapacity: this.settings.rewindBufferCapacity,
+      rewindBufferInterval: this.settings.rewindBufferInterval,
+    });
+
+    this.setState('running');
+    this.hooks.onSaveStatus?.({ status: 'saved', lastSavedAt: record.savedAt });
     return record;
   }
 

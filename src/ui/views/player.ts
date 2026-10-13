@@ -15,6 +15,7 @@ import { confirmDialog, openDialog } from '@/ui/dialog';
 import { FILTERS, filterStyles, type FilterId } from '@/render/display';
 import { GBA_BUTTONS, keyLabel, type GbaButton, type InputAction } from '@/input/bindings';
 import { cheatsRepo } from '@/storage/records';
+import { checkSaveFile } from '@/storage/save-file';
 import { getRomBytes, getGame, titleOf } from '@/library/library';
 import { MgbaCore } from '@/emulator/mgba-adapter';
 import { blockingIssues } from '@/emulator/environment';
@@ -22,6 +23,48 @@ import { PlayerController, applyViewport } from '@/app/player';
 import { enableCrossOriginIsolation, isolationFailureMessage } from '@/pwa/register';
 import { notice, type ViewContext, type ViewInstance } from '@/app/app';
 import { formatDuration } from '@/storage/quota';
+
+/**
+ * "Load save…": brings in a battery save from the user's own disk and restarts
+ * the running game on it.
+ *
+ * The picker is a real `<input type="file">` kept out of sight rather than a
+ * click-through label, because the file has to be read as bytes and validated
+ * before anything is written — a save of the wrong size would make the game
+ * believe its own save is corrupt.
+ */
+function createLoadSaveControl(onPick: (file: File) => void): {
+  button: HTMLElement;
+  input: HTMLInputElement;
+} {
+  const input = el('input', {
+    className: 'visually-hidden',
+    attrs: {
+      type: 'file',
+      accept: '.sav,.srm,.bin,application/octet-stream',
+      id: 'save-file-input',
+    },
+  });
+
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) onPick(file);
+  });
+
+  const button = el('button', {
+    className: 'btn btn-sm',
+    text: 'Load save…',
+    attrs: {
+      type: 'button',
+      title:
+        'Replace the in-game save with a .sav/.srm file from your machine and restart the game on it (your current save is kept as a backup)',
+    },
+    on: { click: () => input.click() },
+  });
+
+  return { button, input };
+}
 
 export async function renderPlayerView(context: ViewContext): Promise<ViewInstance> {
   const { app, route, navigate } = context;
@@ -279,6 +322,36 @@ export async function renderPlayerView(context: ViewContext): Promise<ViewInstan
 
   document.body.setAttribute('data-playing', 'true');
 
+  // Importing a battery save restarts the running game on it, so the control is
+  // part of the strip rather than a library-only action: the file the user wants
+  // to continue from is usually on disk right next to the ROM they just opened.
+  const { button: loadSaveButton, input: saveFileInput } = createLoadSaveControl((file) => {
+    void confirmAndImportSave(file);
+  });
+  element.appendChild(saveFileInput);
+
+  /**
+   * Validation first, dialog second: a file that is not a cartridge save is
+   * refused outright, and only a loadable one is worth interrupting the player
+   * for. Confirmation exists because this restarts the game over the current
+   * progress — the replaced save is kept, but the running session is not.
+   */
+  async function confirmAndImportSave(file: File): Promise<void> {
+    const check = checkSaveFile(file.name, file.size);
+    if (!check.ok) {
+      notify.error('That save file cannot be used', check.reason);
+      return;
+    }
+    const confirmed = await confirmDialog({
+      title: `Load ${file.name}?`,
+      description: `${check.label}, from your machine. The game restarts on it, and the in-game save you have now is kept as a backup you can export from this game\u2019s page.`,
+      confirmLabel: 'Load save',
+      danger: true,
+    });
+    if (!confirmed) return;
+    await controller.importSaveFile(file);
+  }
+
   function updateSpeedIndicator(multiplier: number, isHold: boolean): void {
     const percent = Math.round(multiplier * 100);
     speedIndicator.textContent = multiplier === 1 ? '100%' : `${percent}%${isHold ? ' ⏩' : ''}`;
@@ -437,6 +510,7 @@ export async function renderPlayerView(context: ViewContext): Promise<ViewInstan
       attrs: { type: 'button', title: 'Write the game’s battery save to browser storage now' },
       on: { click: () => void controller.flushSave() },
     }),
+    loadSaveButton,
     holdButton(
       'Fast-forward',
       () => controller.beginFastForward(),

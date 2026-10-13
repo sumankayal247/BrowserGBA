@@ -51,10 +51,10 @@ Phases 0–6 of the plan in [`GAME_PLAN.md`](GAME_PLAN.md) are in place and gree
 | Gate | Result |
 | --- | --- |
 | `npm run typecheck` | clean (TypeScript 7, `strict`) |
-| `npm test` | 174 tests across 10 files |
+| `npm test` | 184 tests across 11 files |
 | `npm run build` | 42 modules; `dist/` + service worker with 22 precache entries |
 | `npm run test:browser` | 17/17 — real browser, real mGBA core, fixture ROM |
-| `npm run test:e2e` | 75/75 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → isolation repair (header-less host **and** a repository sub-path) → embed refusal → offline |
+| `npm run test:e2e` | 81/81 — real UI: import → play → screenshot → battery save → export → backup → edit → cheats → remap → duplicate handling → loading a save file back (refused when it is not a cartridge save, confirmed before it replaces progress) → isolation repair (header-less host **and** a repository sub-path) → embed refusal → offline |
 
 What is **not** verified is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), which
 mirrors the app's own Compatibility screen. In particular: no commercial ROM has
@@ -133,6 +133,9 @@ Chromium-only calls.
   volume and mute, reset, and a fullscreen mode.
 - **Saves** — in-game battery saves plus separate named save-state slots, with
   import/export and backup bundles (JSON, no ROM bytes) for moving between devices.
+  A `.sav`/`.srm` from another emulator or an earlier export can be loaded back: it is
+  checked by size, confirmed before it replaces your progress, and the save it displaced is
+  kept as a backup.
 - **Cheats** — per-game cheat files (GameShark, CodeBreaker, PAR, raw VBA). A code
   the core refuses is skipped and flagged instead of breaking the session, and codes
   can never leak between games.
