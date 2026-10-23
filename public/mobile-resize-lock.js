@@ -81,7 +81,7 @@
       left = clamp(left, 0, Math.max(0, hostRect.width - size));
       top = clamp(top, 0, Math.max(0, hostRect.height - size));
 
-      button.style.left = size + 0 === size ? left + 'px' : button.style.left;
+      button.style.left = left + 'px';
       button.style.top = top + 'px';
       button.style.width = size + 'px';
       button.style.height = size + 'px';
@@ -136,10 +136,10 @@
       var dy = event.clientY - active.startY;
       var delta = Math.max(dx, dy);
       var maxSize = Math.min(
-        Math.max(44, hostRect.width - active.left),
-        Math.max(44, hostRect.height - active.top)
+        hostRect.width - active.left,
+        hostRect.height - active.top
       );
-      var size = clamp(active.size + delta, 44, maxSize);
+      var size = clamp(active.size + delta, 44, Math.max(44, maxSize));
 
       active.button.style.left = clamp(active.left, 0, Math.max(0, hostRect.width - size)) + 'px';
       active.button.style.top = clamp(active.top, 0, Math.max(0, hostRect.height - size)) + 'px';
@@ -174,14 +174,14 @@
     document.addEventListener('pointerup', finish, true);
     document.addEventListener('pointercancel', finish, true);
 
-    var observer = new MutationObserver(function () {
+    var attributeObserver = new MutationObserver(function () {
       if (host.getAttribute('data-resize-mode') !== 'true') {
-        // mobile-player.js calls applySavedLayout() when resize mode closes;
-        // re-apply our uncapped saved size afterwards.
+        // mobile-player.js calls its capped applySavedLayout() when resize
+        // mode closes; re-apply our uncapped saved size afterwards.
         setTimeout(function () { applySavedLayout(host); }, 0);
       }
     });
-    observer.observe(host, { attributes: true, attributeFilter: ['data-resize-mode', 'data-custom-layout'] });
+    attributeObserver.observe(host, { attributes: true, attributeFilter: ['data-resize-mode', 'data-custom-layout'] });
 
     applySavedLayout(host);
   }
