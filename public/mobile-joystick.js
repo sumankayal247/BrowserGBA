@@ -2,9 +2,9 @@
   'use strict';
 
   var MOBILE = '(pointer: coarse), (max-width: 720px)';
-  var STYLE_ID = 'browsergba-mobile-joystick-style';
+  var STYLE_ID = 'browsergba-mobile-dpad-style';
   var LAYOUT_KEY = 'browsergba.touch-layout.v1';
-  var READY = 'data-bg-joystick-ready';
+  var READY = 'data-bg-dpad-ready';
 
   function isMobile() {
     return globalThis.matchMedia?.(MOBILE).matches ?? globalThis.innerWidth <= 720;
@@ -21,7 +21,9 @@
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch {}
   }
 
-  function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
 
   function injectStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -32,57 +34,81 @@
         visibility: hidden !important;
         pointer-events: none !important;
       }
-      .bg-mobile-joystick {
+      .bg-mobile-dpad {
         position: absolute !important;
         z-index: 8 !important;
-        width: 150px;
-        height: 150px;
-        min-width: 80px;
-        min-height: 80px;
-        border-radius: 50%;
+        width: 156px;
+        height: 156px;
+        min-width: 96px;
+        min-height: 96px;
+        border-radius: 22%;
         touch-action: none !important;
         user-select: none;
         -webkit-user-select: none;
-        background: radial-gradient(circle at center, rgba(30, 38, 54, .98) 0 22%, rgba(19, 25, 38, .98) 23% 62%, rgba(11, 15, 24, .98) 63% 100%);
-        border: 2px solid rgba(125, 211, 160, .45);
-        box-shadow: inset 0 0 0 10px rgba(255,255,255,.025), 0 4px 16px rgba(0,0,0,.28);
+        background: transparent;
       }
-      .bg-mobile-joystick::before {
-        content: '';
+      .bg-mobile-dpad-button {
         position: absolute;
-        inset: 12%;
-        border: 1px solid rgba(255,255,255,.08);
-        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        margin: 0;
+        border: 1px solid rgba(255,255,255,.10);
+        background: linear-gradient(180deg, #303b50, #202a3c);
+        color: #f3f6fb;
+        font: 700 clamp(18px, 6vw, 28px)/1 system-ui, sans-serif;
+        text-shadow: 0 1px 2px rgba(0,0,0,.45);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 3px 9px rgba(0,0,0,.28);
+        -webkit-tap-highlight-color: transparent;
         pointer-events: none;
       }
-      .bg-mobile-joystick-thumb {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: 38%;
-        height: 38%;
-        transform: translate(-50%, -50%);
-        border-radius: 50%;
-        background: radial-gradient(circle at 35% 30%, #59677e, #2a3447 62%, #182033);
-        border: 2px solid rgba(255,255,255,.14);
-        box-shadow: 0 4px 10px rgba(0,0,0,.35);
-        pointer-events: none;
-        transition: transform .06s linear;
+      .bg-mobile-dpad-button.is-pressed {
+        background: linear-gradient(180deg, #1b2435, #111827);
+        box-shadow: inset 0 2px 5px rgba(0,0,0,.42);
+        transform: translateY(1px);
       }
-      .bg-mobile-joystick.is-active .bg-mobile-joystick-thumb { transition: none; }
-      .touch-controls[data-resize-mode="true"] .bg-mobile-joystick {
-        box-shadow: 0 0 0 2px rgba(125,211,160,.2), inset 0 0 0 10px rgba(255,255,255,.025);
+      .bg-mobile-dpad-up {
+        left: 29%; top: 0; width: 42%; height: 38%;
+        border-radius: 20% 20% 7% 7%;
+      }
+      .bg-mobile-dpad-down {
+        left: 29%; bottom: 0; width: 42%; height: 38%;
+        border-radius: 7% 7% 20% 20%;
+      }
+      .bg-mobile-dpad-left {
+        left: 0; top: 29%; width: 38%; height: 42%;
+        border-radius: 20% 7% 7% 20%;
+      }
+      .bg-mobile-dpad-right {
+        right: 0; top: 29%; width: 38%; height: 42%;
+        border-radius: 7% 20% 20% 7%;
+      }
+      .bg-mobile-dpad-center {
+        position: absolute;
+        left: 31%; top: 31%; width: 38%; height: 38%;
+        border-radius: 18%;
+        background: #202a3c;
+        box-shadow: inset 0 2px 6px rgba(0,0,0,.34);
+        pointer-events: none;
+      }
+      .touch-controls[data-resize-mode="true"] .bg-mobile-dpad {
+        box-shadow: 0 0 0 2px rgba(125,211,160,.25);
         cursor: grab;
       }
-      .touch-controls[data-resize-mode="true"] .bg-mobile-joystick::after {
+      .touch-controls[data-resize-mode="true"] .bg-mobile-dpad::after {
         content: '';
         position: absolute;
-        right: 5px;
-        bottom: 5px;
-        width: 11px;
-        height: 11px;
+        right: 3px;
+        bottom: 3px;
+        width: 12px;
+        height: 12px;
         border-right: 2px solid var(--accent);
         border-bottom: 2px solid var(--accent);
+        pointer-events: none;
+      }
+      .touch-controls[data-resize-mode="true"] .bg-mobile-dpad-button,
+      .touch-controls[data-resize-mode="true"] .bg-mobile-dpad-center {
         pointer-events: none;
       }
     `;
@@ -90,7 +116,7 @@
   }
 
   function findDirectionButtons(host) {
-    var buttons = Array.from(host.querySelectorAll('.touch-key'));
+    var buttons = Array.from(host.querySelectorAll('.touch-pad .touch-key'));
     var result = {};
     for (var button of buttons) {
       var key = (button.getAttribute('data-button') || '').toLowerCase();
@@ -118,149 +144,164 @@
     button.dispatchEvent(event);
   }
 
-  function setupJoystick(host) {
+  function setupDpad(host) {
     if (host.getAttribute(READY) === 'true') return;
     var directions = findDirectionButtons(host);
     if (Object.keys(directions).length !== 4) return;
 
     host.setAttribute(READY, 'true');
-    var joystick = document.createElement('div');
-    joystick.className = 'bg-mobile-joystick touch-key';
-    joystick.setAttribute('data-button', 'joystick');
-    joystick.setAttribute('aria-label', 'Virtual directional joystick');
-    joystick.setAttribute('role', 'application');
-    var thumb = document.createElement('div');
-    thumb.className = 'bg-mobile-joystick-thumb';
-    joystick.appendChild(thumb);
-    host.appendChild(joystick);
+
+    var dpad = document.createElement('div');
+    dpad.className = 'bg-mobile-dpad touch-key';
+    dpad.setAttribute('data-button', 'dpad');
+    dpad.setAttribute('aria-label', 'Directional pad');
+    dpad.setAttribute('role', 'application');
+
+    var visualDirections = [
+      ['up', '▲'],
+      ['down', '▼'],
+      ['left', '◀'],
+      ['right', '▶'],
+    ];
+    for (var item of visualDirections) {
+      var button = document.createElement('div');
+      button.className = 'bg-mobile-dpad-button bg-mobile-dpad-' + item[0];
+      button.textContent = item[1];
+      button.setAttribute('aria-hidden', 'true');
+      dpad.appendChild(button);
+    }
+    var center = document.createElement('div');
+    center.className = 'bg-mobile-dpad-center';
+    center.setAttribute('aria-hidden', 'true');
+    dpad.appendChild(center);
+    host.appendChild(dpad);
 
     var layout = loadLayout();
-    var hostRect = host.getBoundingClientRect();
-    var saved = layout.joystick;
-    var size = saved?.s ? saved.s * Math.min(hostRect.width, hostRect.height) : Math.min(150, hostRect.height * .72, hostRect.width * .34);
-    size = clamp(size, 80, Math.max(80, Math.min(hostRect.width * .55, hostRect.height * .9)));
-    var left = saved?.x != null ? saved.x * hostRect.width : 18;
-    var top = saved?.y != null ? saved.y * hostRect.height : (hostRect.height - size) / 2;
-    left = clamp(left, 0, Math.max(0, hostRect.width - size));
-    top = clamp(top, 0, Math.max(0, hostRect.height - size));
-    joystick.style.width = size + 'px';
-    joystick.style.height = size + 'px';
-    joystick.style.left = left + 'px';
-    joystick.style.top = top + 'px';
+    var saved = layout.dpad;
 
-    var held = new Set();
-    var activePointer = null;
-    var deadZone = .18;
-    var maxDistance = .34;
-
-    function persist() {
-      var rect = joystick.getBoundingClientRect();
-      var current = host.getBoundingClientRect();
-      var currentSize = Math.min(rect.width, rect.height);
-      layout = loadLayout();
-      layout.joystick = {
-        x: (rect.left - current.left) / Math.max(current.width, 1),
-        y: (rect.top - current.top) / Math.max(current.height, 1),
-        s: currentSize / Math.max(Math.min(current.width, current.height), 1),
-        aspect: rect.width / Math.max(rect.height, 1),
-      };
-      saveLayout(layout);
+    function applySaved() {
+      var rect = host.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      var size = saved?.s ? saved.s * Math.min(rect.width, rect.height) : Math.min(156, rect.height * .62, rect.width * .36);
+      size = clamp(size, 96, Math.max(96, Math.min(rect.width * .55, rect.height * .9)));
+      var left = saved?.x != null ? saved.x * rect.width : 18;
+      var top = saved?.y != null ? saved.y * rect.height : (rect.height - size) / 2;
+      left = clamp(left, 0, Math.max(0, rect.width - size));
+      top = clamp(top, 0, Math.max(0, rect.height - size));
+      dpad.style.width = size + 'px';
+      dpad.style.height = size + 'px';
+      dpad.style.left = left + 'px';
+      dpad.style.top = top + 'px';
     }
 
-    function releaseAll(event) {
-      for (var direction of held) dispatchButton(directions[direction], 'pointerup', event);
-      held.clear();
-      thumb.style.transform = 'translate(-50%, -50%)';
-      joystick.classList.remove('is-active');
+    applySaved();
+
+    var held = null;
+    var activePointer = null;
+    var lastDirection = null;
+
+    function setVisual(direction, pressed) {
+      var visual = dpad.querySelector('.bg-mobile-dpad-' + direction);
+      if (visual) visual.classList.toggle('is-pressed', pressed);
+    }
+
+    function release(event) {
+      if (held) {
+        dispatchButton(directions[held], 'pointerup', event);
+        setVisual(held, false);
+      }
+      held = null;
+      lastDirection = null;
       activePointer = null;
     }
 
-    function updateDirection(event) {
-      var rect = joystick.getBoundingClientRect();
+    function directionAt(event) {
+      var rect = dpad.getBoundingClientRect();
       var cx = rect.left + rect.width / 2;
       var cy = rect.top + rect.height / 2;
       var dx = event.clientX - cx;
       var dy = event.clientY - cy;
-      var radius = Math.min(rect.width, rect.height) / 2;
-      var distance = Math.sqrt(dx * dx + dy * dy);
-      var normalized = Math.min(distance / Math.max(radius, 1), maxDistance) / maxDistance;
-      var dead = distance < radius * deadZone;
-      var angle = Math.atan2(dy, dx);
-      var ux = dead ? 0 : Math.cos(angle);
-      var uy = dead ? 0 : Math.sin(angle);
-      var thumbDistance = dead ? 0 : radius * .42 * normalized;
-      thumb.style.transform = `translate(calc(-50% + ${ux * thumbDistance}px), calc(-50% + ${uy * thumbDistance}px))`;
+      var distance = Math.hypot(dx, dy);
+      var radius = Math.min(rect.width, rect.height) * .5;
 
-      var next = new Set();
-      if (!dead) {
-        var threshold = .38;
-        if (ux < -threshold) next.add('left');
-        if (ux > threshold) next.add('right');
-        if (uy < -threshold) next.add('up');
-        if (uy > threshold) next.add('down');
-      }
+      // Keep a forgiving centre zone. Once a direction is held, require a
+      // meaningful change before switching so normal thumb movement does not chatter.
+      if (distance < radius * .20) return held;
 
-      for (var direction of held) {
-        if (!next.has(direction)) dispatchButton(directions[direction], 'pointerup', event);
-      }
-      for (var direction of next) {
-        if (!held.has(direction)) dispatchButton(directions[direction], 'pointerdown', event);
-      }
-      held = next;
+      if (Math.abs(dx) > Math.abs(dy) * .72) return dx < 0 ? 'left' : 'right';
+      if (Math.abs(dy) > Math.abs(dx) * .72) return dy < 0 ? 'up' : 'down';
+      return lastDirection || held || (Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down'));
     }
 
-    joystick.addEventListener('pointerdown', function (event) {
+    function update(event) {
+      var next = directionAt(event);
+      if (!next || next === held) return;
+
+      if (held) {
+        dispatchButton(directions[held], 'pointerup', event);
+        setVisual(held, false);
+      }
+      held = next;
+      lastDirection = next;
+      dispatchButton(directions[next], 'pointerdown', event);
+      setVisual(next, true);
+    }
+
+    dpad.addEventListener('pointerdown', function (event) {
       if (host.getAttribute('data-resize-mode') === 'true') return;
       event.preventDefault();
       event.stopPropagation();
       activePointer = event.pointerId;
-      joystick.setPointerCapture?.(event.pointerId);
-      joystick.classList.add('is-active');
-      updateDirection(event);
+      dpad.setPointerCapture?.(event.pointerId);
+      update(event);
     });
-    joystick.addEventListener('pointermove', function (event) {
+
+    dpad.addEventListener('pointermove', function (event) {
       if (activePointer !== event.pointerId) return;
       event.preventDefault();
       event.stopPropagation();
-      updateDirection(event);
+      update(event);
     });
-    joystick.addEventListener('pointerup', function (event) {
+
+    dpad.addEventListener('pointerup', function (event) {
       if (activePointer !== event.pointerId) return;
       event.preventDefault();
       event.stopPropagation();
-      releaseAll(event);
+      release(event);
     });
-    joystick.addEventListener('pointercancel', function (event) {
+
+    dpad.addEventListener('pointercancel', function (event) {
       if (activePointer !== event.pointerId) return;
-      releaseAll(event);
+      release(event);
     });
 
     globalThis.addEventListener('resize', function () {
-      var current = loadLayout().joystick;
-      var r = host.getBoundingClientRect();
-      if (!r.width || !r.height || !current) return;
-      var w = clamp(current.s * Math.min(r.width, r.height), 80, Math.max(80, Math.min(r.width * .55, r.height * .9)));
-      joystick.style.width = w + 'px';
-      joystick.style.height = w + 'px';
-      joystick.style.left = clamp(current.x * r.width, 0, Math.max(0, r.width - w)) + 'px';
-      joystick.style.top = clamp(current.y * r.height, 0, Math.max(0, r.height - w)) + 'px';
+      saved = loadLayout().dpad;
+      applySaved();
     }, { passive: true });
 
-    // The existing resize editor treats .touch-key as movable/resizable.
-    // Persist the joystick's normalized position and size after the editor changes it.
+    // Resize mode is owned by mobile-player.js. Persist this single d-pad group
+    // after the editor changes its position or size, never its four visual arrows.
     var last = '';
     setInterval(function () {
-      if (!document.contains(joystick)) return;
+      if (!document.contains(dpad)) return;
       if (host.getAttribute('data-resize-mode') !== 'true') {
-        var rect = joystick.getBoundingClientRect();
+        var rect = dpad.getBoundingClientRect();
         var current = host.getBoundingClientRect();
         var signature = [rect.left, rect.top, rect.width, rect.height].map(Math.round).join(':');
         if (signature !== last) {
           last = signature;
-          persist();
+          layout = loadLayout();
+          layout.dpad = {
+            x: (rect.left - current.left) / Math.max(current.width, 1),
+            y: (rect.top - current.top) / Math.max(current.height, 1),
+            s: Math.min(rect.width, rect.height) / Math.max(Math.min(current.width, current.height), 1),
+            aspect: rect.width / Math.max(rect.height, 1),
+          };
+          saveLayout(layout);
         }
       }
-    }, 500);
+    }, 350);
   }
 
   function scan() {
@@ -268,7 +309,7 @@
     if (!isMobile()) return;
     document.body.setAttribute('data-bg-mobile-player', 'true');
     var hosts = document.querySelectorAll('.touch-controls[data-enabled="true"]');
-    for (var host of hosts) setupJoystick(host);
+    for (var host of hosts) setupDpad(host);
   }
 
   injectStyles();
