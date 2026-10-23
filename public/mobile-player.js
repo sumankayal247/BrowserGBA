@@ -78,15 +78,21 @@
       }
       .touch-controls[data-resize-mode="true"] .touch-pad,
       .touch-controls[data-resize-mode="true"] .touch-buttons,
-      .touch-controls[data-resize-mode="true"] .touch-shoulders {
+      .touch-controls[data-resize-mode="true"] .touch-shoulders,
+      .touch-controls[data-custom-layout="true"] .touch-pad,
+      .touch-controls[data-custom-layout="true"] .touch-buttons,
+      .touch-controls[data-custom-layout="true"] .touch-shoulders {
         display: contents !important;
       }
-      .touch-controls[data-resize-mode="true"] .touch-key {
+      .touch-controls[data-resize-mode="true"] .touch-key,
+      .touch-controls[data-custom-layout="true"] .touch-key {
         position: absolute !important;
         margin: 0 !important;
         z-index: 3;
-        box-shadow: 0 0 0 2px rgba(125, 211, 160, 0.18);
         touch-action: none !important;
+      }
+      .touch-controls[data-resize-mode="true"] .touch-key {
+        box-shadow: 0 0 0 2px rgba(125, 211, 160, 0.18);
       }
       .touch-controls[data-resize-mode="true"] .touch-hint {
         display: block !important;
@@ -97,10 +103,6 @@
         padding: 0.2rem 0.4rem;
         border-radius: 4px;
         bottom: 0.35rem;
-      }
-      .bg-resize-exit {
-        grid-column: 1 / -1;
-        margin-top: 0.1rem;
       }
       @media (min-width: 721px) and (pointer: fine) {
         .bg-mobile-menu-button,
@@ -136,10 +138,33 @@
     return button.getAttribute('data-button') || button.textContent?.trim() || 'button';
   }
 
+  function applySavedLayout(touchHost) {
+    var layout = loadLayout();
+    var buttons = Array.from(touchHost.querySelectorAll('.touch-key'));
+    if (!buttons.some(function (button) { return layout[keyFor(button)]; })) return false;
+
+    var hostRect = touchHost.getBoundingClientRect();
+    touchHost.setAttribute('data-custom-layout', 'true');
+
+    for (var button of buttons) {
+      var saved = layout[keyFor(button)];
+      if (!saved) continue;
+      var sizeBase = Math.min(hostRect.width, hostRect.height);
+      var width = clamp((saved.s || 0.15) * sizeBase, 44, Math.max(44, hostRect.width * 0.35));
+      var height = clamp(width / (saved.aspect || 1), 44, Math.max(44, hostRect.height * 0.35));
+      var left = clamp((saved.x || 0) * hostRect.width, 0, Math.max(0, hostRect.width - width));
+      var top = clamp((saved.y || 0) * hostRect.height, 0, Math.max(0, hostRect.height - height));
+      button.style.left = `${left}px`;
+      button.style.top = `${top}px`;
+      button.style.width = `${width}px`;
+      button.style.height = `${height}px`;
+    }
+    return true;
+  }
+
   function enterResizeMode(touchHost, exitButton) {
     if (touchHost.getAttribute('data-resize-mode') === 'true') return;
     touchHost.setAttribute('data-resize-mode', 'true');
-    exitButton.textContent = 'Done resizing';
 
     var layout = loadLayout();
     var hostRect = touchHost.getBoundingClientRect();
@@ -165,11 +190,13 @@
       button.style.height = `${height}px`;
     }
 
+    exitButton.textContent = 'Done resizing';
     var active = null;
 
     function finish(event) {
       if (!active) return;
       event.preventDefault();
+      event.stopPropagation();
       var button = active.button;
       try { button.releasePointerCapture?.(event.pointerId); } catch {}
       var rect = button.getBoundingClientRect();
@@ -245,14 +272,9 @@
       touchHost.removeEventListener('pointermove', pointerMove, true);
       touchHost.removeEventListener('pointerup', finish, true);
       touchHost.removeEventListener('pointercancel', finish, true);
-      for (var button of buttons) {
-        button.style.removeProperty('left');
-        button.style.removeProperty('top');
-        button.style.removeProperty('width');
-        button.style.removeProperty('height');
-        button.style.removeProperty('cursor');
-      }
       touchHost.removeAttribute('data-resize-mode');
+      touchHost.setAttribute('data-custom-layout', 'true');
+      applySavedLayout(touchHost);
       exitButton.textContent = 'Resize controls';
     };
   }
@@ -265,22 +287,27 @@
     }
   }
 
-  function setupPlayer(player) {
-    if (!isMobile() || player.getAttribute('data-bg-mobile-ready') === 'true') return;
+  function removeVolumeControl(player) {
+    var controlStrip = player.querySelector('.control-strip');
+    if (!controlStrip) return;
+    var volume = controlStrip.querySelector('input[type="range"][aria-label="Volume"]');
+    if (volume) volume.remove();
+    var volumeLabel = controlStrip.querySelector('label[for="player-volume"]');
+    if (volumeLabel) volumeLabel.remove();
+  }
 
+  function setupPlayer(player) {
+    if (player.getAttribute('data-bg-player-ready') === 'true') return;
     var controlStrip = player.querySelector('.control-strip');
     var titleBar = player.querySelector('.player-bar');
     var touchHost = player.querySelector('.touch-controls');
     if (!controlStrip || !titleBar || !touchHost) return;
 
-    player.setAttribute('data-bg-mobile-ready', 'true');
-    document.body.setAttribute('data-bg-mobile-player', 'true');
+    player.setAttribute('data-bg-player-ready', 'true');
+    removeVolumeControl(player);
 
-    // Remove the app volume slider so browser/device volume is the only volume control.
-    var volume = controlStrip.querySelector('input[type="range"][aria-label="Volume"]');
-    if (volume) volume.remove();
-    var volumeLabel = controlStrip.querySelector('label[for="player-volume"]');
-    if (volumeLabel) volumeLabel.remove();
+    if (!isMobile()) return;
+    document.body.setAttribute('data-bg-mobile-player', 'true');
 
     var originalMenu = Array.from(controlStrip.querySelectorAll('button')).find(function (button) {
       return button.textContent?.trim() === 'Menu';
@@ -307,21 +334,18 @@
       toggleResize(touchHost, resizeButton);
       closeMenu();
     });
-
     panel.appendChild(resizeButton);
 
-    // Keep the existing advanced Menu button, but place every other emulator action here too.
     var children = Array.from(controlStrip.children);
     for (var child of children) {
-      if (child === volume || child === volumeLabel) continue;
-      if (child === originalMenu) {
-        originalMenu.textContent = '⚙ Settings';
-      }
+      if (child.tagName === 'INPUT' || child.tagName === 'LABEL') continue;
+      if (child === originalMenu) originalMenu.textContent = '⚙ Settings';
       panel.appendChild(child);
     }
 
     titleBar.appendChild(hamburger);
     titleBar.appendChild(panel);
+    applySavedLayout(touchHost);
 
     function closeMenu() {
       panel.setAttribute('data-open', 'false');
@@ -342,13 +366,22 @@
     touchHost.addEventListener('contextmenu', function (event) {
       if (touchHost.getAttribute('data-resize-mode') === 'true') event.preventDefault();
     });
+
+    if (globalThis.ResizeObserver) {
+      var observer = new ResizeObserver(function () {
+        if (touchHost.getAttribute('data-custom-layout') === 'true' && touchHost.getAttribute('data-resize-mode') !== 'true') {
+          applySavedLayout(touchHost);
+        }
+      });
+      observer.observe(touchHost);
+    }
   }
 
   function scan() {
     injectStyles();
-    if (!isMobile()) return;
     var player = document.querySelector('.player');
     if (player) setupPlayer(player);
+    if (!isMobile()) document.body.removeAttribute('data-bg-mobile-player');
   }
 
   injectStyles();
