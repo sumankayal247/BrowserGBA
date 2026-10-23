@@ -59,8 +59,10 @@ export class PlayerController {
   private constructor(session: EmulatorSession, options: PlayerOptions) {
     this.session = session;
     this.options = options;
-    this.volume = options.settings.volume;
-    this.muted = options.settings.muted;
+    // BrowserGBA deliberately has no per-app volume control. Audio is sent at
+    // unity gain so the browser/OS system volume is the only volume control.
+    this.volume = 1;
+    this.muted = false;
   }
 
   static async create(options: PlayerOptions): Promise<PlayerController> {
@@ -68,7 +70,7 @@ export class PlayerController {
       core: options.core,
       game: options.game,
       romBytes: options.romBytes,
-      settings: options.settings,
+      settings: { ...options.settings, volume: 1, muted: false },
       hooks: {
         onSaveStatus: options.onFeedback,
         onSpeedChange: (multiplier, isHold) => options.onSpeedChange(multiplier, isHold),
