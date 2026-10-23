@@ -94,6 +94,18 @@
       .touch-controls[data-resize-mode="true"] .touch-key {
         box-shadow: 0 0 0 2px rgba(125, 211, 160, 0.18);
       }
+      .touch-controls[data-resize-mode="true"] .touch-key::after {
+        content: '';
+        position: absolute;
+        right: 4px;
+        bottom: 4px;
+        width: 10px;
+        height: 10px;
+        border-right: 2px solid var(--accent);
+        border-bottom: 2px solid var(--accent);
+        pointer-events: none;
+        opacity: 0.85;
+      }
       .touch-controls[data-resize-mode="true"] .touch-hint {
         display: block !important;
         z-index: 4;
@@ -188,7 +200,17 @@
       button.style.top = `${top}px`;
       button.style.width = `${width}px`;
       button.style.height = `${height}px`;
+
+      if (!saved) {
+        layout[key] = {
+          x: left / Math.max(hostRect.width, 1),
+          y: top / Math.max(hostRect.height, 1),
+          s: Math.min(width, height) / Math.max(Math.min(hostRect.width, hostRect.height), 1),
+          aspect: width / Math.max(height, 1),
+        };
+      }
     }
+    saveLayout(layout);
 
     exitButton.textContent = 'Done resizing';
     var active = null;
@@ -368,12 +390,12 @@
     });
 
     if (globalThis.ResizeObserver) {
-      var observer = new ResizeObserver(function () {
+      var resizeObserver = new ResizeObserver(function () {
         if (touchHost.getAttribute('data-custom-layout') === 'true' && touchHost.getAttribute('data-resize-mode') !== 'true') {
           applySavedLayout(touchHost);
         }
       });
-      observer.observe(touchHost);
+      resizeObserver.observe(touchHost);
     }
   }
 
