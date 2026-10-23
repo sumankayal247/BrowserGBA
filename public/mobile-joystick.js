@@ -93,7 +93,7 @@
     var buttons = Array.from(host.querySelectorAll('.touch-key'));
     var result = {};
     for (var button of buttons) {
-      var key = button.getAttribute('data-button') || '';
+      var key = (button.getAttribute('data-button') || '').toLowerCase();
       if (key === 'up' || key === 'down' || key === 'left' || key === 'right') result[key] = button;
     }
     return result;
